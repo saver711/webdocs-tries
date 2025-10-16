@@ -1,0 +1,62 @@
+[
+  {
+    "id": "1",
+    "name": "John Doe",
+    "bio": "Full-stack developer passionate about web technologies",
+    "createdAt": "2025-01-15T10:00:00Z",
+    "socialLinks": [
+      {
+        "platform": "twitter",
+        "url": "https://twitter.com/johndoe"
+      }
+    ]
+  },
+  {
+    "id": "2",
+    "name": "Jane Smith",
+    "bio": "UI/UX designer and front-end specialist",
+    "createdAt": "2025-02-20T14:30:00Z",
+    "socialLinks": [
+      {
+        "platform": "linkedin",
+        "url": "https://linkedin.com/in/janesmith"
+      }
+    ]
+  },
+  {
+    "id": "3",
+    "name": "Mike Johnson",
+    "bio": "Backend engineer focused on scalable systems",
+    "createdAt": "2025-03-10T09:15:00Z",
+    "socialLinks": [
+      {
+        "platform": "github",
+        "url": "https://github.com/mikejohnson"
+      }
+    ]
+  },
+  {
+    "id": "4",
+    "name": "Sarah Williams",
+    "bio": "DevOps and cloud architecture enthusiast",
+    "createdAt": "2025-01-25T16:45:00Z",
+    "socialLinks": [
+      {
+        "platform": "twitter",
+        "url": "https://twitter.com/sarahwilliams"
+      }
+    ]
+  },
+  {
+    "id": "5",
+    "name": "David Brown",
+    "bio": "Mobile app developer with a love for React Native",
+    "createdAt": "2025-02-05T11:20:00Z",
+    "socialLinks": [
+      {
+        "platform": "linkedin",
+        "url": "https://linkedin.com/in/davidbrown"
+      }
+    ]
+  }
+]
