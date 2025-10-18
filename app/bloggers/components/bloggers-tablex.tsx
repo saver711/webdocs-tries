@@ -15,9 +15,12 @@ interface BloggersTableProps {
   data: Blogger[];
 }
 
-export const BloggersTable = ({ data }: BloggersTableProps) => {
-  const { sorting, setSorting } = useTableSorting();
-  const { pagination, setPagination } = useTablePagination();
+export const BloggersTablex = ({ data }: BloggersTableProps) => {
+  const { sorting, setSorting } = useTableSorting("sortx");
+  const { pagination, setPagination } = useTablePagination(
+    "pagex",
+    "pageSizex",
+  );
   const {
     filteredData,
     selectedBloggers,

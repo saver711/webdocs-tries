@@ -1,4 +1,5 @@
 import { BloggersTable } from "./components/bloggers-table";
+import { BloggersTablex } from "./components/bloggers-tablex";
 import type { Blogger } from "./models/blogger.model";
 
 export const revalidate = false;
@@ -19,6 +20,7 @@ export default async function BloggersPage() {
   return (
     <div className="container mx-auto py-10">
       <BloggersTable data={data} />
+      {/* <BloggersTablex data={data} /> */}
     </div>
   );
 }

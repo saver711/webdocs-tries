@@ -1,3 +1,4 @@
+// app/components/ui/table/table-pagination.tsx
 import type { Table } from "@tanstack/react-table";
 import {
   ArrowLeftCircleIcon,
@@ -13,7 +14,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { DEFAULT_TABLE_PER_PAGE_OPTIONS } from "./consts/default-table-per-page-options.const";
+import { getRowsPerPageOptions } from "./utils/get-rows-per-page-options";
 
 type TablePaginationProps<TData> = {
   table: Table<TData>;
@@ -27,8 +28,7 @@ export const TablePagination = <TData,>({
   const pageIndex = table.getState().pagination.pageIndex;
   const pageSize = table.getState().pagination.pageSize;
 
-  // const perPageOptions = getRowsPerPageOptions(pageSize);
-  const perPageOptions = DEFAULT_TABLE_PER_PAGE_OPTIONS; // [2, 5, 10, 20, 30, 40, 50]
+  const perPageOptions = getRowsPerPageOptions(pageSize);
 
   return (
     <div className="flex items-center gap-4">
@@ -44,13 +44,13 @@ export const TablePagination = <TData,>({
             <SelectValue placeholder={pageSize} />
           </SelectTrigger>
           <SelectContent side="top">
-            {perPageOptions.map((pageSize) => (
+            {perPageOptions.map((option) => (
               <SelectItem
                 className="cursor-pointer"
-                key={pageSize}
-                value={`${pageSize}`}
+                key={option}
+                value={`${option}`}
               >
-                {pageSize}
+                {option}
               </SelectItem>
             ))}
           </SelectContent>

@@ -7,10 +7,11 @@ import {
   getCoreRowModel,
   getPaginationRowModel,
   getSortedRowModel,
+  type PaginationState,
   type SortingState,
   useReactTable,
 } from "@tanstack/react-table";
-import { useEffect, useState } from "react";
+import { type Dispatch, type SetStateAction, useEffect, useState } from "react";
 import {
   Table,
   TableBody,
@@ -26,6 +27,12 @@ interface DataTableProps<TData, TValue> {
   data: TData[];
   onRowSelectionChange?: (selectedRows: TData[]) => void;
   rowId: keyof TData;
+
+  sorting: SortingState;
+  setSorting: Dispatch<SetStateAction<SortingState>>;
+
+  setPagination: (updater: SetStateAction<PaginationState>) => void;
+  pagination: PaginationState;
 }
 
 export const DataTable = <TData, TValue>({
@@ -33,8 +40,12 @@ export const DataTable = <TData, TValue>({
   data,
   onRowSelectionChange,
   rowId,
+  sorting,
+  setSorting,
+
+  setPagination,
+  pagination,
 }: DataTableProps<TData, TValue>) => {
-  const [sorting, setSorting] = useState<SortingState>([]);
   const [rowSelection, setRowSelection] = useState({});
 
   const table = useReactTable({
@@ -45,9 +56,11 @@ export const DataTable = <TData, TValue>({
     onSortingChange: setSorting,
     getPaginationRowModel: getPaginationRowModel(),
     onRowSelectionChange: setRowSelection,
+    onPaginationChange: setPagination,
     state: {
       sorting,
       rowSelection,
+      pagination: pagination,
     },
     getRowId: (row) => String(row[rowId]),
   });
