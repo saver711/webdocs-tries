@@ -1,1 +1,1 @@
-export const DEFAULT_TABLE_PER_PAGE_VALUE = 2
+export const DEFAULT_TABLE_PER_PAGE_VALUE = 5
