@@ -3,6 +3,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import Link from "next/link";
 import { type SubmitHandler, useForm } from "react-hook-form";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { loginAction } from "./actions/login.action";
 import { type LoginFormParams, loginFormSchema } from "./actions/login-schema";
@@ -17,13 +18,13 @@ export default function Home() {
     mode: "onBlur",
   });
   const onSubmit: SubmitHandler<LoginFormParams> = async (inputs) => {
-    const res = await loginAction(inputs);
-    const { data, validationErrors } = res;
+    await loginAction(inputs).then(() => {
+      toast.success("Logged in successfully!");
+    });
   };
 
   const onLogout = async () => {
-    const res = await logoutAction();
-    console.log("   Logout response:", res);
+    await logoutAction();
   };
 
   return (
@@ -33,6 +34,7 @@ export default function Home() {
           <input
             placeholder="email"
             defaultValue="super@super.com"
+            className="text-black"
             {...register("email")}
           />
           {errors.email && <span>This field is required</span>}
@@ -40,6 +42,8 @@ export default function Home() {
         <div className="flex flex-col">
           <input
             placeholder="password"
+            defaultValue="123"
+            className="text-black"
             {...register("password", { required: true })}
           />
           {errors.password && <span>This field is required</span>}

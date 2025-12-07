@@ -15,14 +15,14 @@ import type { Blogger } from "../models/blogger.model";
 
 interface DeleteBloggerProps {
   blogger: Blogger;
-  onDelete: (id: string) => void;
+  onDelete: (id: string[]) => void;
 }
 
-export const DeleteBlogger = ({ blogger, onDelete }: DeleteBloggerProps) => {
+export const DeleteBloggers = ({ blogger, onDelete }: DeleteBloggerProps) => {
   const [open, setOpen] = useState(false);
 
   const handleConfirm = () => {
-    onDelete(blogger.id);
+    onDelete([blogger._id]);
     setOpen(false);
   };
 

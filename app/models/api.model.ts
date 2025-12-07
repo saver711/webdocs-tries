@@ -1,8 +1,12 @@
-export type SortOrder = "asc" | "desc"
+// app/models/api.model.ts
+export enum SortOrder {
+  ASC = "asc",
+  DESC = "desc",
+}
 
 export interface ApiError {
-  message: string
-  errorCode?: string // TODO: Define error codes
+  message: string;
+  errorCode?: string; // TODO: Define error codes
 }
 
 export enum ErrorCode {
@@ -44,17 +48,16 @@ export enum ErrorCode {
   ACCESS_DENIED = "ACCESS_DENIED",
 
   ONE_OR_MANY_MEAL_BELONG_TO_ANOTHER_RESTAURANT = "ONE_OR_MANY_MEAL_BELONG_TO_ANOTHER_RESTAURANT",
-  EMAIL_CANNOT_BE_EDITED = "EMAIL_CANNOT_BE_EDITED"
+  EMAIL_CANNOT_BE_EDITED = "EMAIL_CANNOT_BE_EDITED",
 }
-// NOT IN DOCS NOW
 interface Pagination {
-  total: number
-  currentPage: number
-  pageSize: number
+  total: number;
+  currentPage: number;
+  perPage: number;
+  pageCount: number;
 }
-// NOT IN DOCS NOW
 export interface PaginatedResponse<T> {
-  data: T[]
-  message: string
-  pagination: Pagination
+  data: T[];
+  message: string;
+  pagination: Pagination;
 }

@@ -1,11 +1,11 @@
-import type { ApiError, ErrorCode } from "@/app/models/api.model"
+import type { ApiError, ErrorCode } from "@/app/models/api.model";
 
 export const getErrorMessage = (error: ApiError) => {
-  let errorMessage = error.message || "Something went wrong!"
-  const errorCode = error.errorCode
+  let errorMessage = error.message || "Something went wrong!";
+  const errorCode = error.errorCode;
   //   const errorCode: ErrorCode | PluralErrorCode = data.errorCode
   if (!errorCode) {
-    return errorMessage
+    return errorMessage;
   }
 
   // Define a map of singular error messages.
@@ -52,8 +52,8 @@ export const getErrorMessage = (error: ApiError) => {
     // MISMATCH
     ONE_OR_MANY_MEAL_BELONG_TO_ANOTHER_RESTAURANT:
       "One or more meals belong to another restaurant.",
-    EMAIL_CANNOT_BE_EDITED: "Email cannot be edited."
-  }
+    EMAIL_CANNOT_BE_EDITED: "Email cannot be edited.",
+  };
 
   // Define a map of plural error messages.
   //   const pluralMessages: Record<PluralErrorCode, string> = {};
@@ -61,8 +61,8 @@ export const getErrorMessage = (error: ApiError) => {
   //   if (isPlural && errorCode in pluralMessages) {
   //     errorMessage = pluralMessages[errorCode as PluralErrorCode];
   //   } else if (!isPlural && errorCode in singularMessages) {
-  errorMessage = singularMessages[errorCode as ErrorCode]
+  errorMessage = singularMessages[errorCode as ErrorCode];
   //   }
 
-  return errorMessage || "Something went wrong!"
-}
+  return errorMessage || "Something went wrong!";
+};

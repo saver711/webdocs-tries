@@ -1,19 +1,16 @@
 // app/bloggers/hooks/use-bloggers-url-state.ts
-"use client"
+"use client";
 
-import { parseAsString, useQueryStates } from "nuqs"
+import { type inferParserType, parseAsString, useQueryStates } from "nuqs";
 export const bloggersUrlStateSchema = {
-  name: parseAsString.withDefault(""),
-  bio: parseAsString.withDefault(""),
-  dateFrom: parseAsString.withDefault(""),
-  dateTo: parseAsString.withDefault("")
-}
+  name: parseAsString,
+  bio: parseAsString,
+  dateFrom: parseAsString,
+  dateTo: parseAsString,
+};
 
-// type BloggersUrlState = inferParserType<typeof bloggersUrlStateSchema>
+export type BloggersUrlState = inferParserType<typeof bloggersUrlStateSchema>;
 
-export const useBloggersUrlState = () =>
-  useQueryStates(bloggersUrlStateSchema, {
-    history: "replace"
-  })
+export const useBloggersUrlState = () => useQueryStates(bloggersUrlStateSchema);
 
 // export const serializeBloggersUrl = createSerializer(bloggersUrlStateSchema)

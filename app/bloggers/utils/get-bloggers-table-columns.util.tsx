@@ -1,22 +1,22 @@
 // app/bloggers/utils/get-bloggers-table-columns.util.tsx
-"use client"
+"use client";
 
-import type { ColumnDef } from "@tanstack/react-table"
-import { formatInTimeZone } from "date-fns-tz"
-import { TableActionsCell } from "@/app/components/ui/table/table-actions-cell"
-import { TableSelectAllCheckbox } from "@/app/components/ui/table/table-select-all-checkbox"
-import { TableSelectRowCheckbox } from "@/app/components/ui/table/table-select-row-checkbox"
-import { TableSortingButton } from "@/app/components/ui/table/table-sorting-button"
-import { DropdownMenuItem } from "@/components/ui/dropdown-menu"
-import { DeleteBlogger } from "../components/delete-blogger"
-import type { Blogger } from "../models/blogger.model"
+import type { ColumnDef } from "@tanstack/react-table";
+import { formatInTimeZone } from "date-fns-tz";
+import { TableActionsCell } from "@/app/components/ui/table/table-actions-cell";
+import { TableSelectAllCheckbox } from "@/app/components/ui/table/table-select-all-checkbox";
+import { TableSelectRowCheckbox } from "@/app/components/ui/table/table-select-row-checkbox";
+import { TableSortingButton } from "@/app/components/ui/table/table-sorting-button";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { DeleteBloggers } from "../components/delete-bloggers";
+import type { Blogger } from "../models/blogger.model";
 
 interface BloggersTableColumnsProps {
-  onDelete: (id: string) => void
+  onDelete: (id: string[]) => void;
 }
 
 export const getBloggersTableColumns = ({
-  onDelete
+  onDelete,
 }: BloggersTableColumnsProps): ColumnDef<Blogger>[] => {
   return [
     {
@@ -24,28 +24,30 @@ export const getBloggersTableColumns = ({
       header: ({ table }) => <TableSelectAllCheckbox table={table} />,
       cell: ({ row }) => <TableSelectRowCheckbox row={row} />,
       enableSorting: false,
-      enableHiding: false
+      enableHiding: false,
     },
     {
-      accessorKey: "id",
+      accessorKey: "_id",
       header: ({ column }) => <TableSortingButton column={column} label="ID" />,
       cell: ({ row }) => {
         return (
           <div className="flex justify-center items-center">
-            {row.original.id}
+            {row.original._id}
           </div>
-        )
-      }
+        );
+      },
     },
     {
       accessorKey: "name",
       header: ({ column }) => (
         <TableSortingButton column={column} label="Name" />
-      )
+      ),
     },
     {
       accessorKey: "bio",
-      header: ({ column }) => <TableSortingButton column={column} label="Bio" />
+      header: ({ column }) => (
+        <TableSortingButton column={column} label="Bio" />
+      ),
     },
     {
       accessorKey: "createdAt",
@@ -53,10 +55,10 @@ export const getBloggersTableColumns = ({
         <TableSortingButton column={column} label="Created At" />
       ),
       cell: ({ row }) => {
-        const date = row.original.createdAt
+        const date = row.original.createdAt;
 
-        return formatInTimeZone(date, "UTC", "MMMM do, yyyy")
-      }
+        return formatInTimeZone(date, "UTC", "MMMM do, yyyy");
+      },
     },
     {
       id: "actions",
@@ -64,10 +66,10 @@ export const getBloggersTableColumns = ({
       cell: ({ row }) => (
         <TableActionsCell>
           <DropdownMenuItem asChild>
-            <DeleteBlogger blogger={row.original} onDelete={onDelete} />
+            <DeleteBloggers blogger={row.original} onDelete={onDelete} />
           </DropdownMenuItem>
         </TableActionsCell>
-      )
-    }
-  ]
-}
+      ),
+    },
+  ];
+};

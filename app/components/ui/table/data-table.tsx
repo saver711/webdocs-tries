@@ -33,6 +33,10 @@ interface DataTableProps<TData, TValue> {
 
   setPagination: (updater: SetStateAction<PaginationState>) => void;
   pagination: PaginationState;
+
+  pageCount: number;
+  isLoading?: boolean;
+  error?: string;
 }
 
 export const DataTable = <TData, TValue>({
@@ -45,6 +49,10 @@ export const DataTable = <TData, TValue>({
 
   setPagination,
   pagination,
+
+  pageCount,
+  isLoading,
+  error,
 }: DataTableProps<TData, TValue>) => {
   const [rowSelection, setRowSelection] = useState({});
 
@@ -57,12 +65,16 @@ export const DataTable = <TData, TValue>({
     getPaginationRowModel: getPaginationRowModel(),
     onRowSelectionChange: setRowSelection,
     onPaginationChange: setPagination,
+    manualFiltering: true,
+    manualPagination: true,
+    manualSorting: true,
     state: {
       sorting,
       rowSelection,
-      pagination: pagination,
+      pagination,
     },
     getRowId: (row) => String(row[rowId]),
+    pageCount: pageCount,
   });
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: Iam depending on rowSelection
@@ -77,6 +89,53 @@ export const DataTable = <TData, TValue>({
 
   const selectedRowsCount = table.getFilteredSelectedRowModel().rows.length;
   const rowsCount = table.getFilteredRowModel().rows.length;
+
+  // Helper function to render table content
+  const renderTableContent = () => {
+    // Error state
+    if (error) {
+      return (
+        <TableRow>
+          <TableCell colSpan={columns.length} className="h-24 text-center">
+            {error}
+          </TableCell>
+        </TableRow>
+      );
+    }
+
+    // Loading state
+    if (isLoading) {
+      return (
+        <TableRow>
+          <TableCell colSpan={columns.length} className="h-24 text-center">
+            Loading...
+          </TableCell>
+        </TableRow>
+      );
+    }
+
+    // No data state
+    if (!table.getRowModel().rows?.length) {
+      return (
+        <TableRow>
+          <TableCell colSpan={columns.length} className="h-24 text-center">
+            No results.
+          </TableCell>
+        </TableRow>
+      );
+    }
+
+    // Data state
+    return table.getRowModel().rows.map((row) => (
+      <TableRow key={row.id} data-state={row.getIsSelected() && "selected"}>
+        {row.getVisibleCells().map((cell) => (
+          <TableCell key={cell.id}>
+            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+          </TableCell>
+        ))}
+      </TableRow>
+    ));
+  };
 
   return (
     <div>
@@ -100,34 +159,7 @@ export const DataTable = <TData, TValue>({
               </TableRow>
             ))}
           </TableHeader>
-          <TableBody>
-            {table.getRowModel().rows?.length ? (
-              table.getRowModel().rows.map((row) => (
-                <TableRow
-                  key={row.id}
-                  data-state={row.getIsSelected() && "selected"}
-                >
-                  {row.getVisibleCells().map((cell) => (
-                    <TableCell key={cell.id}>
-                      {flexRender(
-                        cell.column.columnDef.cell,
-                        cell.getContext(),
-                      )}
-                    </TableCell>
-                  ))}
-                </TableRow>
-              ))
-            ) : (
-              <TableRow>
-                <TableCell
-                  colSpan={columns.length}
-                  className="h-24 text-center"
-                >
-                  No results.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
+          <TableBody>{renderTableContent()}</TableBody>
         </Table>
       </div>
       <div className="flex justify-between items-center py-2">

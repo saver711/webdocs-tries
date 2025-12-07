@@ -1,13 +1,14 @@
 // app/bloggers/components/bloggers-filter-bar.tsx
-"use client"
+"use client";
 
-import { zodResolver } from "@hookform/resolvers/zod"
-import { Filter } from "lucide-react"
-import { useRef } from "react"
-import { useForm } from "react-hook-form"
-import { z } from "zod"
-import { DatePicker } from "@/app/components/ui/date-picker"
-import { Button } from "@/components/ui/button"
+import { zodResolver } from "@hookform/resolvers/zod";
+import { Filter } from "lucide-react";
+import { useRef } from "react";
+import { useForm } from "react-hook-form";
+import { z } from "zod";
+import { DatePicker } from "@/app/components/ui/date-picker";
+import { useTablePagination } from "@/app/components/ui/table/hooks/use-table-pagination";
+import { Button } from "@/components/ui/button";
 import {
   Drawer,
   DrawerClose,
@@ -15,49 +16,32 @@ import {
   DrawerFooter,
   DrawerHeader,
   DrawerTitle,
-  DrawerTrigger
-} from "@/components/ui/drawer"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { useBloggersUrlState } from "../hooks/use-bloggers-url-state"
-import type { Blogger } from "../models/blogger.model"
-import { filterBloggers } from "../utils/filter-bloggers"
+  DrawerTrigger,
+} from "@/components/ui/drawer";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { useBloggersUrlState } from "../hooks/use-bloggers-url-state";
 
 const filterSchema = z.object({
-  name: z.string().optional(),
-  bio: z.string().optional(),
-  dateFrom: z.date().nullable().optional(),
-  dateTo: z.date().nullable().optional()
-})
+  name: z.string().nullable(),
+  dateFrom: z.date().nullable(),
+  dateTo: z.date().nullable(),
+});
 
-export type FilterInputs = z.infer<typeof filterSchema>
-
-interface BloggersFilterBarProps {
-  data: Blogger[]
-  onFilter: (filteredData: Blogger[]) => void
-}
-
-function toUTCStartOfLocalDay(date: Date) {
-  const localYear = date.getFullYear()
-  const localMonth = date.getMonth()
-  const localDay = date.getDate()
-
-  const dLocalMidnight = new Date(localYear, localMonth, localDay, 0, 0, 0, 0)
-  return dLocalMidnight.toISOString()
-}
+export type FilterInputs = z.infer<typeof filterSchema>;
 
 function toUTCEndOfLocalDay(date: Date) {
-  const localYear = date.getFullYear()
-  const localMonth = date.getMonth()
-  const localDay = date.getDate()
+  const localYear = date.getFullYear();
+  const localMonth = date.getMonth();
+  const localDay = date.getDate();
 
-  const dLocalEnd = new Date(localYear, localMonth, localDay, 23, 59, 59, 999)
-  return dLocalEnd.toISOString()
+  const dLocalEnd = new Date(localYear, localMonth, localDay, 23, 59, 59, 999);
+  return dLocalEnd.toISOString();
 }
 
 const parseUTCDate = (isoString: string | null) => {
-  if (!isoString) return null
-  const date = new Date(isoString)
+  if (!isoString) return null;
+  const date = new Date(isoString);
   return new Date(
     Date.UTC(
       date.getUTCFullYear(),
@@ -66,60 +50,54 @@ const parseUTCDate = (isoString: string | null) => {
       date.getUTCHours(),
       date.getUTCMinutes(),
       date.getUTCSeconds(),
-      date.getUTCMilliseconds()
-    )
-  )
-}
+      date.getUTCMilliseconds(),
+    ),
+  );
+};
 
-export const BloggersFilterBar = ({
-  onFilter,
-  data
-}: BloggersFilterBarProps) => {
-  const drawerCloseRef = useRef<HTMLButtonElement>(null)
-  const [query, setQuery] = useBloggersUrlState()
+export const BloggersFilterBar = () => {
+  const drawerCloseRef = useRef<HTMLButtonElement>(null);
+  const [query, setQuery] = useBloggersUrlState();
+  const { setPagination } = useTablePagination();
   const filtersAppliedCount = Object.values(query).filter(
-    value => value !== undefined && value !== null && value !== ""
-  ).length
+    (value) => value !== undefined && value !== null && value !== "",
+  ).length;
 
   const form = useForm<FilterInputs>({
     resolver: zodResolver(filterSchema),
     defaultValues: {
       ...query,
       dateFrom: query.dateFrom ? parseUTCDate(query.dateFrom) : null,
-      dateTo: query.dateTo ? parseUTCDate(query.dateTo) : null
-    }
-  })
+      dateTo: query.dateTo ? parseUTCDate(query.dateTo) : null,
+    },
+  });
 
   const onSubmit = (values: FilterInputs) => {
     setQuery({
       ...values,
-      dateFrom: values.dateFrom ? values.dateFrom.toISOString() : "",
-      dateTo: values.dateTo ? toUTCEndOfLocalDay(values.dateTo) : ""
-    })
+      dateFrom: values.dateFrom ? values.dateFrom.toISOString() : null,
+      dateTo: values.dateTo ? toUTCEndOfLocalDay(values.dateTo) : null,
+    });
 
-    const filteredData = filterBloggers(
-      {
-        ...values,
-        dateFrom: values.dateFrom ? toUTCStartOfLocalDay(values.dateFrom) : "",
-        dateTo: values.dateTo ? toUTCEndOfLocalDay(values.dateTo) : ""
-      },
-      data
-    )
-    onFilter(filteredData)
-    drawerCloseRef.current?.click()
-  }
+    // Move to first page
+    setPagination((prev) => ({
+      ...prev,
+      pageIndex: 0,
+    }));
+
+    drawerCloseRef.current?.click();
+  };
 
   const handleReset = () => {
-    form.reset()
-  }
+    form.reset();
+  };
 
   function handleClear(): void {
     form.reset({
-      bio: "",
       dateFrom: null,
       dateTo: null,
-      name: ""
-    })
+      name: null,
+    });
   }
   return (
     <Drawer direction="right">
@@ -157,25 +135,14 @@ export const BloggersFilterBar = ({
               />
             </div>
 
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="bio">Bio</Label>
-              <Input
-                id="bio"
-                placeholder="Search by bio..."
-                {...form.register("bio")}
-              />
-            </div>
-
             <div className="flex flex-col gap-4">
               <span className="text-sm font-medium">Created Date Range</span>
               <div className="flex gap-2 flex-wrap">
                 <DatePicker
                   id="date-from"
                   date={form.watch("dateFrom") ?? undefined}
-                  setDate={date => {
-                    console.log(date)
-                    console.log(date?.toUTCString())
-                    form.setValue("dateFrom", date)
+                  setDate={(date) => {
+                    form.setValue("dateFrom", date ?? null);
                   }}
                   placeholder="From"
                 />
@@ -183,7 +150,7 @@ export const BloggersFilterBar = ({
                 <DatePicker
                   id="date-to"
                   date={form.watch("dateTo") ?? undefined}
-                  setDate={date => form.setValue("dateTo", date)}
+                  setDate={(date) => form.setValue("dateTo", date ?? null)}
                   placeholder="To"
                 />
               </div>
@@ -222,5 +189,5 @@ export const BloggersFilterBar = ({
         </DrawerFooter>
       </DrawerContent>
     </Drawer>
-  )
-}
+  );
+};

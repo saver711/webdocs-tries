@@ -1,47 +1,57 @@
 // app/bloggers/components/bloggers-table.tsx
-"use client"
+"use client";
 
-import { Trash2 } from "lucide-react"
-import { DataTable } from "@/app/components/ui/table/data-table"
-import { useTablePagination } from "@/app/components/ui/table/hooks/use-table-pagination"
-import { useTableSorting } from "@/app/components/ui/table/hooks/use-table-sorting"
-import { Button } from "@/components/ui/button"
-import { useBloggersDeletion } from "../hooks/use-bloggers-deletion"
-import type { Blogger } from "../models/blogger.model"
-import { getBloggersTableColumns } from "../utils/get-bloggers-table-columns.util"
-import { BloggersFilterBar } from "./bloggers-filter-bar"
+import { useQuery } from "@tanstack/react-query";
+import { Trash2 } from "lucide-react";
+import { DataTable } from "@/app/components/ui/table/data-table";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+import { Button } from "@/components/ui/button";
+import { useBloggersQueryParams } from "../hooks/use-bloggers-query-params";
+import { useDeleteBloggers } from "../hooks/use-delete-bloggers";
+import { getBloggersTableColumns } from "../utils/get-bloggers-table-columns.util";
+import { BloggersFilterBar } from "./bloggers-filter-bar";
 
-interface BloggersTableProps {
-  data: Blogger[]
-  filteredData: Blogger[]
-}
-
-export const BloggersTable = ({ data, filteredData }: BloggersTableProps) => {
-  const { sorting, setSorting } = useTableSorting()
-  const { pagination, setPagination } = useTablePagination()
+export const BloggersTable = () => {
   const {
-    filteredData: finalData,
-    selectedBloggers,
-    setSelectedBloggers,
-    handleDelete,
-    handleBulkDelete,
-    setFilteredData
-  } = useBloggersDeletion(filteredData)
+    sorting,
+    setSorting,
+    pagination,
+    setPagination,
+    fetchBloggersParams,
+  } = useBloggersQueryParams();
 
-  const columns = getBloggersTableColumns({ onDelete: handleDelete })
+  const {
+    data: bloggersResponse,
+    error,
+    isLoading,
+  } = useQuery({
+    queryKey: ["bloggers", fetchBloggersParams],
+    queryFn: () => fetchBloggers(fetchBloggersParams),
+  });
+
+  const data = bloggersResponse?.data;
+
+  const { selectedBloggers, setSelectedBloggers, deleteBloggers } =
+    useDeleteBloggers({
+      pagination,
+      setPagination,
+      currentDataLength: data?.length,
+    });
+  const pageCount = bloggersResponse?.pagination.pageCount;
+  const columns = getBloggersTableColumns({ onDelete: deleteBloggers });
 
   return (
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <div className="flex items-center justify-center gap-2">
-          <BloggersFilterBar data={data} onFilter={setFilteredData} />
+          <BloggersFilterBar />
         </div>
 
         {selectedBloggers.length > 0 && (
           <Button
             variant="destructive"
             size="sm"
-            onClick={handleBulkDelete}
+            onClick={() => deleteBloggers(selectedBloggers.map((b) => b._id))}
             className="flex items-center gap-2"
           >
             <Trash2 className="h-4 w-4" />
@@ -52,14 +62,17 @@ export const BloggersTable = ({ data, filteredData }: BloggersTableProps) => {
 
       <DataTable
         columns={columns}
-        data={finalData}
+        data={data || []}
         onRowSelectionChange={setSelectedBloggers}
-        rowId="id"
+        rowId="_id"
         sorting={sorting}
         setSorting={setSorting}
         pagination={pagination}
+        pageCount={pageCount ?? 1}
         setPagination={setPagination}
+        isLoading={isLoading}
+        error={error?.message}
       />
     </div>
-  )
-}
+  );
+};
