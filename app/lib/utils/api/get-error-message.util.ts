@@ -23,6 +23,7 @@ export const getErrorMessage = (error: ApiError) => {
     MISSING_GOOGLE_ID_OR_PHONE: "Google ID or phone number is required.",
     PASSWORDS_REQUIRED: "Passwords are required.",
     NO_TOKEN_PROVIDED: "No token provided",
+    INVALID_TOKEN: "Invalid token.",
 
     // EXPIRED / INCORRECT / INVALID
     REFRESH_TOKEN_EXPIRED: "Refresh token has expired.",

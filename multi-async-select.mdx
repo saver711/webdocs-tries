@@ -1,0 +1,3690 @@
+---
+title: Multi-Async-Select Component
+description: A comprehensive guide to building a production-ready async multi-select component with real-world use cases
+---
+
+import Author from "@/components/shared/author.tsx"
+
+## Introduction
+
+Most UI libraries provide basic multi-select components that work well for simple use cases with static data. However, real-world applications face complex challenges that these basic components don't address:
+
+- **Edit Mode**: When editing a form, the backend only returns IDs of selected items, not their full details
+- **Async Data Loading**: Options are fetched from an API, not available statically
+- **Pagination**: Large datasets require pagination with infinite scroll
+- **Select All Pattern**: Selecting all items (including future ones) requires a special pattern with excluded items
+- **Missing Data**: Selected IDs might not be in the initial API response
+
+This guide demonstrates how to build a robust `MultiAsyncSelect` component that handles these real-world scenarios, showing why most UI libraries fall short and how to bridge the gap.
+
+---
+
+## Component Implementation
+
+Here's the complete `MultiAsyncSelect` component implementation:
+
+```tsx title="app/components/ui/multi-async-select.tsx"
+"use client"
+
+import type { PopoverContentProps } from "@radix-ui/react-popover"
+import { CheckIcon, ChevronDown, Loader, Minus, X } from "lucide-react"
+import * as React from "react"
+import { useEffect, useImperativeHandle, useRef } from "react"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList
+} from "@/components/ui/command"
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger
+} from "@/components/ui/popover"
+import { Separator } from "@/components/ui/separator"
+import { cn } from "@/lib/utils"
+
+export interface Option {
+  label: React.ReactNode
+  value: string // should be unique, and not empty
+}
+
+interface Props
+  extends Omit<React.ButtonHTMLAttributes<HTMLButtonElement>, "value"> {
+  /**
+   * An array of objects to be displayed in the Select.Option.
+   */
+  options: Option[]
+
+  /**
+   * Whether the select is async. If true, the getting options should be async.
+   * Optional, defaults to false.
+   */
+  async?: boolean
+
+  /**
+   * Whether is fetching options. If true, the loading indicator will be shown.
+   * Optional, defaults to false. Works only when async is true.
+   */
+  loading?: boolean
+
+  /**
+   * The error object. If true, the error message will be shown.
+   * Optional, defaults to null. Works only when async is true.
+   */
+  error?: Error | null
+
+  /**
+   * The default selected values when the component mounts.
+   * In single select mode (multiple=false), this is a string or undefined.
+   * In multi select mode (multiple=true), this is an array of strings.
+   */
+  defaultValue?: string[] | string
+
+  /**
+   * The selected values.
+   * In single select mode (multiple=false), this is a string, null, or undefined.
+   * In multi select mode (multiple=true), this is an array of strings.
+   * In async mode when all is selected, this can be a string (the selectAllValue).
+   * Optional, defaults to undefined.
+   */
+  value?: string[] | string | null
+
+  /**
+   * Placeholder text to be displayed when no values are selected.
+   * Optional, defaults to "Select options".
+   */
+  placeholder?: string
+
+  /**
+   * Placeholder text to be displayed when the search input is empty.
+   * Optional, defaults to "Search...".
+   */
+  searchPlaceholder?: string
+
+  /**
+   * Maximum number of items to display. Extra selected items will be summarized.
+   * Optional, defaults to 3.
+   */
+  maxCount?: number
+
+  /**
+   * The modality of the popover. When set to true, interaction with outside elements
+   * will be disabled and only popover content will be visible to screen readers.
+   * Optional, defaults to false.
+   */
+  modalPopover?: boolean
+
+  /**
+   * Additional class names to apply custom styles to the multi-select component.
+   * Optional, can be used to add custom styles.
+   */
+  className?: string
+
+  /**
+   * Text to be displayed when the clear button is clicked.
+   * Optional, defaults to "Clear".
+   */
+  clearText?: string
+
+  /**
+   * Text to be displayed when the close button is clicked.
+   * Optional, defaults to "Close".
+   */
+  closeText?: string
+
+  /**
+   * Whether to hide the select all option.
+   * Optional, defaults to false.
+   */
+  hideSelectAll?: boolean
+
+  /**
+   * Whether to clear search input when popover closes.
+   * Optional, defaults to false.
+   */
+  clearSearchOnClose?: boolean
+
+  /**
+   * Controlled search value. If provided, the component will use this value instead of internal state.
+   * Optional, defaults to undefined.
+   */
+  searchValue?: string
+
+  /**
+   * Additional options for the popover content.
+   * Optional, defaults to null.
+   * portal: Whether to use portal to render the popover content. !!!need to modify the popover component!!!
+   */
+  popoverOptions?: PopoverContentProps & {
+    portal?: boolean
+  }
+
+  /**
+   * Custom label function.
+   * Optional, defaults to null.
+   */
+  labelFunc?: (
+    option: Option,
+    isSelected: boolean,
+    index: number
+  ) => React.ReactNode
+
+  /**
+   * Callback function triggered when the selected values change.
+   * In single select mode (multiple=false), receives a string or undefined.
+   * In multi select mode (multiple=true), receives an array of strings.
+   * In async mode when all is selected, receives a string (the selectAllValue).
+   */
+  onValueChange: (value: string[] | string | undefined) => void
+
+  /**
+   * Callback function triggered when the search input changes.
+   * Receives the search input value.
+   */
+  onSearch?: (value: string) => void
+
+  /**
+   * Special value to use when "select all" is enabled in async mode.
+   * This value will be sent to the backend to indicate all items are selected.
+   * Optional, defaults to "__ALL__".
+   */
+  selectAllValue?: string
+
+  /**
+   * Array of excluded item values when "select all" is active in async mode.
+   * Optional, defaults to undefined.
+   */
+  excluded?: string[]
+
+  /**
+   * Callback function triggered when excluded items change.
+   * Only used in async mode when "select all" is active.
+   * Receives an array of excluded item values.
+   */
+  onExcludedChange?: (excluded: string[]) => void
+
+  /**
+   * Whether the select component is disabled.
+   * When disabled, the component cannot be interacted with and shows a disabled visual state.
+   * Optional, defaults to false.
+   */
+  disabled?: boolean
+
+  /**
+   * Whether multiple selections are allowed.
+   * When false, only one option can be selected at a time and the popover closes on selection.
+   * Optional, defaults to true.
+   */
+  multiple?: boolean
+
+  /**
+   * Callback function triggered when user scrolls near the bottom of the list.
+   * Used for infinite scroll/pagination. Only called when hasMore is true.
+   * Optional, defaults to undefined.
+   */
+  onLoadMore?: () => void
+
+  /**
+   * Whether there are more items to load (for pagination).
+   * When true and user scrolls near bottom, onLoadMore will be called.
+   * Optional, defaults to false.
+   */
+  hasMore?: boolean
+
+  /**
+   * Whether pagination is currently loading more items.
+   * Optional, defaults to false.
+   */
+  isLoadingMore?: boolean
+}
+
+interface MultiAsyncSelectRef {
+  setIsPopoverOpen: (open: boolean) => void
+  setSearchValue: (value: string) => void
+}
+
+export const MultiAsyncSelect = React.forwardRef<MultiAsyncSelectRef, Props>(
+  (
+    {
+      options,
+      value,
+      className,
+      defaultValue = [],
+      placeholder = "Select...",
+      searchPlaceholder = "Search...",
+      maxCount = 3,
+      modalPopover = false,
+      loading = false,
+      async = false,
+      error = null,
+      hideSelectAll = false,
+      popoverOptions,
+      labelFunc,
+      onValueChange,
+      onSearch,
+      clearSearchOnClose = false,
+      searchValue,
+      selectAllValue = "__ALL__",
+      excluded,
+      onExcludedChange,
+      disabled = false,
+      multiple = true,
+      onLoadMore,
+      hasMore = false,
+      isLoadingMore = false
+    },
+    ref
+  ) => {
+    // Normalize value to array format for internal state
+    // For single select, we still use array internally but convert on output
+    const normalizeValue = React.useCallback(
+      (val: string[] | string | undefined | null): string[] => {
+        if (val === undefined || val === null) return []
+        if (typeof val === "string") return [val]
+        return val
+      },
+      []
+    )
+
+    const [selectedValues, setSelectedValues] = React.useState<string[]>(() =>
+      normalizeValue(defaultValue)
+    )
+    const [isPopoverOpen, setIsPopoverOpen] = React.useState(false)
+    const [isOverflowPopoverOpen, setIsOverflowPopoverOpen] =
+      React.useState(false)
+    const [searchValueState, setSearchValueState] = React.useState(
+      searchValue ?? ""
+    )
+    const [reserveOptions, setReserveOptions] = React.useState<
+      Record<string, Option>
+    >({})
+    const [excludedState, setExcludedState] = React.useState<string[]>(
+      excluded ?? []
+    )
+    const optionsRef = useRef<Record<string, Option>>({})
+    const isInit = useRef(false)
+    const commandListRef = useRef<HTMLDivElement>(null)
+
+    // Check if we're in "all selected" mode (async mode with selectAllValue)
+    const isAllSelected =
+      async &&
+      selectedValues.length === 1 &&
+      selectedValues[0] === selectAllValue
+
+    // Get the actual excluded items (controlled or internal state)
+    const currentExcluded = excluded ?? excludedState
+
+    const handleInputKeyDown = (
+      event: React.KeyboardEvent<HTMLInputElement>
+    ) => {
+      if (event.key === "Enter") {
+        setIsPopoverOpen(true)
+      } else if (
+        event.key === "Backspace" &&
+        !event.currentTarget.value &&
+        multiple
+      ) {
+        const newSelectedValues = [...selectedValues]
+        newSelectedValues.pop()
+        setSelectedValues(newSelectedValues)
+        onValueChange(newSelectedValues)
+      }
+    }
+
+    const toggleOption = (optionValue: string) => {
+      // Store current option in reserve
+      const currentOption = options.find(opt => opt.value === optionValue)
+      if (currentOption) {
+        reserveOptions[optionValue] = currentOption
+      }
+
+      // If isAllSelected in async mode, manage excluded items
+      if (async && isAllSelected) {
+        const newExcluded = currentExcluded.includes(optionValue)
+          ? currentExcluded.filter(v => v !== optionValue)
+          : [...currentExcluded, optionValue]
+
+        setExcludedState(newExcluded)
+        onExcludedChange?.(newExcluded)
+        return
+      }
+
+      // Single select mode: replace selection and close popover
+      if (!multiple) {
+        const newSelectedValues = selectedValues.includes(optionValue)
+          ? []
+          : [optionValue]
+        setSelectedValues(newSelectedValues)
+        // Return string or undefined for single select mode
+        onValueChange(
+          newSelectedValues.length === 0 ? undefined : newSelectedValues[0]
+        )
+        // Close popover after selection in single mode
+        if (newSelectedValues.length > 0) {
+          setIsPopoverOpen(false)
+          if (clearSearchOnClose) {
+            setSearchValueState("")
+            onSearch?.("")
+          }
+        }
+        return
+      }
+
+      // Multi select mode: toggle selection
+      const newSelectedValues = selectedValues.includes(optionValue)
+        ? selectedValues.filter(value => value !== optionValue)
+        : [...selectedValues, optionValue]
+
+      setSelectedValues(newSelectedValues)
+      onValueChange(newSelectedValues)
+    }
+
+    const handleClear = () => {
+      setSelectedValues([])
+      // Return appropriate type based on multiple mode
+      onValueChange(multiple ? [] : undefined)
+      if (async) {
+        setExcludedState([])
+        onExcludedChange?.([])
+      }
+    }
+
+    const toggleAll = () => {
+      if (async) {
+        // Async mode: use selectAllValue pattern
+        if (isAllSelected) {
+          // Check if we're in indeterminate state (some excluded)
+          if (currentExcluded.length > 0) {
+            // Indeterminate: select all remaining (clear excluded)
+            setExcludedState([])
+            onExcludedChange?.([])
+            // Keep the __ALL__ state
+          } else {
+            // All selected with no excluded: deselect all
+            setSelectedValues([])
+            onValueChange([])
+            setExcludedState([])
+            onExcludedChange?.([])
+          }
+        } else {
+          // Not all selected, select all (including future items)
+          // Return string value instead of array
+          setSelectedValues([selectAllValue])
+          onValueChange(selectAllValue)
+          // Clear excluded when selecting all
+          setExcludedState([])
+          onExcludedChange?.([])
+        }
+      } else {
+        // Sync mode: select/deselect current visible options
+        const currentOptions = options
+        const currentOptionValues = currentOptions.map(option => option.value)
+
+        // Check selection state
+        const selectedCount = currentOptionValues.filter(value =>
+          selectedValues.includes(value)
+        ).length
+        const allCurrentSelected = selectedCount === currentOptionValues.length
+
+        if (allCurrentSelected) {
+          // All selected: deselect only the current options
+          // Keep other selected values that are not in current options
+          const newSelectedValues = selectedValues.filter(
+            value => !currentOptionValues.includes(value)
+          )
+          setSelectedValues(newSelectedValues)
+          onValueChange(newSelectedValues)
+        } else {
+          // Empty or indeterminate: select all current options
+          // Merge with existing selections
+          const newSelectedValues = [
+            ...new Set([...selectedValues, ...currentOptionValues])
+          ]
+          setSelectedValues(newSelectedValues)
+          onValueChange(newSelectedValues)
+        }
+      }
+    }
+
+    useEffect(() => {
+      const temp = options.reduce((acc, option) => {
+        acc[option.value] = option
+        return acc
+      }, {} as Record<string, Option>)
+      if (async) {
+        if (isInit.current === false) {
+          // On first init, add all current options plus any selected values that match
+          const selectedOptions = selectedValues.reduce((acc, value) => {
+            const option = temp[value]
+            if (option) {
+              acc[value] = option
+            }
+            return acc
+          }, {} as Record<string, Option>)
+          optionsRef.current = { ...temp, ...selectedOptions }
+          setReserveOptions({ ...temp, ...selectedOptions })
+          isInit.current = true
+        } else {
+          // Also add any selected values that are now in the new options
+          const temp2 = selectedValues.reduce((acc, value) => {
+            // First check if we already have it in reserve
+            const existingOption = optionsRef.current[value]
+            if (existingOption) {
+              acc[value] = existingOption
+            } else {
+              // Check if it's in the new options
+              const newOption = temp[value]
+              if (newOption) {
+                acc[value] = newOption
+              }
+            }
+            return acc
+          }, {} as Record<string, Option>)
+          optionsRef.current = {
+            ...temp,
+            ...temp2,
+            ...optionsRef.current // Preserve existing reserve options
+          }
+          setReserveOptions(prev => ({
+            ...temp,
+            ...temp2,
+            ...prev // Preserve existing reserve options
+          }))
+        }
+      }
+    }, [async, options, selectedValues])
+
+    useEffect(() => {
+      // Always sync with the value prop, even if it's undefined or null
+      // This ensures that when value is cleared (undefined/null), we show empty state
+      setSelectedValues(normalizeValue(value))
+    }, [value, normalizeValue])
+
+    useEffect(() => {
+      if (excluded !== undefined) {
+        setExcludedState(excluded)
+      }
+    }, [excluded])
+
+    useEffect(() => {
+      if (searchValue !== undefined) {
+        setSearchValueState(searchValue)
+      }
+    }, [searchValue])
+
+    // Auto-load more when content fits in container and hasMore is true
+    useEffect(() => {
+      if (!onLoadMore || !hasMore || isLoadingMore || !isPopoverOpen) return
+
+      const checkAndLoadMore = () => {
+        const list = commandListRef.current
+        if (!list) return
+
+        const scrollHeight = list.scrollHeight
+        const clientHeight = list.clientHeight
+
+        // If content fits within container (no scrollbar needed) and we have more to load
+        if (scrollHeight <= clientHeight && hasMore && !isLoadingMore) {
+          onLoadMore()
+        }
+      }
+
+      // Check after DOM updates - use requestAnimationFrame for better timing
+      let timeoutId: NodeJS.Timeout
+      const rafId = requestAnimationFrame(() => {
+        // Small delay to ensure all content is rendered
+        timeoutId = setTimeout(checkAndLoadMore, 50)
+      })
+
+      return () => {
+        cancelAnimationFrame(rafId)
+        if (timeoutId) clearTimeout(timeoutId)
+      }
+    }, [hasMore, isLoadingMore, isPopoverOpen, onLoadMore])
+
+    useImperativeHandle(ref, () => ({
+      setIsPopoverOpen,
+      setSearchValue: setSearchValueState
+    }))
+
+    return (
+      <Popover
+        open={disabled ? false : isPopoverOpen}
+        onOpenChange={open => {
+          if (disabled) return
+          setIsPopoverOpen(open)
+          if (!open && clearSearchOnClose) {
+            setSearchValueState("")
+            onSearch?.("")
+          }
+        }}
+        modal={modalPopover}
+      >
+        <PopoverTrigger asChild disabled={disabled}>
+          <div
+            className={cn(
+              "flex min-h-10 w-full min-w-[160px] items-center justify-between rounded-md border border-input bg-background px-4 text-sm ring-offset-background placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2",
+              disabled ? "cursor-not-allowed opacity-50" : "cursor-pointer",
+              selectedValues.length > 0 ? "py-1.5" : "py-2",
+              className
+            )}
+          >
+            {selectedValues.length > 0 || isAllSelected ? (
+              <div className="flex w-full items-center justify-between">
+                {multiple ? (
+                  <div className="flex flex-wrap items-center gap-1 overflow-x-auto">
+                    {isAllSelected ? (
+                      <div className="flex h-[26px] items-center gap-1 rounded-md border border-zinc-200 px-2 py-0.5 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+                        <div className="flex items-center gap-1 truncate text-xs">
+                          All selected
+                          {currentExcluded.length > 0 && (
+                            <span className="text-muted-foreground">
+                              ({currentExcluded.length} excluded)
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        {selectedValues.slice(0, maxCount).map(value => {
+                          let option: Option | undefined
+                          if (async) {
+                            option = reserveOptions[value]
+                          } else {
+                            option = options.find(
+                              option => option.value === value
+                            )
+                          }
+                          return (
+                            <div
+                              className="flex h-[26px] items-center gap-1 rounded-md border border-zinc-200 px-2 py-0.5 text-zinc-600 hover:border-zinc-400 hover:text-primary dark:border-zinc-700 dark:text-zinc-400 dark:hover:border-zinc-600 dark:hover:text-primary"
+                              key={value}
+                            >
+                              <div className="flex max-w-[100px] items-center gap-1 truncate text-xs">
+                                {option?.label ?? value}
+                              </div>
+                              <X
+                                className={cn(
+                                  "box-content h-3 w-3 shrink-0 rounded-full p-1 text-zinc-500",
+                                  disabled
+                                    ? "cursor-not-allowed opacity-50"
+                                    : "cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                                )}
+                                onClick={event => {
+                                  if (disabled) return
+                                  event.stopPropagation()
+                                  toggleOption(value)
+                                }}
+                              />
+                            </div>
+                          )
+                        })}
+                        {selectedValues.length > maxCount && (
+                          <Popover
+                            open={isOverflowPopoverOpen}
+                            onOpenChange={setIsOverflowPopoverOpen}
+                            modal={false}
+                          >
+                            <PopoverTrigger asChild>
+                              <button
+                                type="button"
+                                className={cn(
+                                  "inline-flex cursor-pointer items-center rounded-md border border-zinc-200 px-1.5 py-0.5 text-sm font-medium text-zinc-600 transition-colors hover:bg-zinc-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 dark:border-zinc-700 dark:text-zinc-400",
+                                  disabled && "cursor-not-allowed opacity-50"
+                                )}
+                                onClick={event => {
+                                  if (disabled) return
+                                  event.stopPropagation()
+                                  event.preventDefault()
+                                  // Close main popover when opening overflow popover
+                                  setIsPopoverOpen(false)
+                                  setIsOverflowPopoverOpen(prev => !prev)
+                                }}
+                                onPointerDown={event => {
+                                  if (disabled) return
+                                  event.stopPropagation()
+                                }}
+                                onMouseDown={event => {
+                                  if (disabled) return
+                                  event.stopPropagation()
+                                }}
+                              >
+                                <span>{`+ ${
+                                  selectedValues.length - maxCount
+                                }`}</span>
+                                <X
+                                  className={cn(
+                                    "ml-2 box-content h-3 w-3 shrink-0 rounded-full p-1 text-zinc-300 dark:text-zinc-500",
+                                    disabled
+                                      ? "cursor-not-allowed opacity-50"
+                                      : "cursor-pointer hover:bg-zinc-100 hover:text-primary dark:hover:bg-zinc-800"
+                                  )}
+                                  onClick={event => {
+                                    if (disabled) return
+                                    event.stopPropagation()
+                                    event.preventDefault()
+                                    setIsOverflowPopoverOpen(prev => !prev)
+                                  }}
+                                  onPointerDown={event => {
+                                    if (disabled) return
+                                    event.stopPropagation()
+                                  }}
+                                  onMouseDown={event => {
+                                    if (disabled) return
+                                    event.stopPropagation()
+                                  }}
+                                />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-64 p-2"
+                              align="start"
+                              onEscapeKeyDown={() =>
+                                setIsOverflowPopoverOpen(false)
+                              }
+                              onInteractOutside={event => {
+                                // Prevent closing when clicking inside the main popover
+                                const target = event.target as HTMLElement
+                                if (target.closest('[role="dialog"]')) {
+                                  event.preventDefault()
+                                }
+                              }}
+                              onClick={event => {
+                                // Prevent clicks inside overflow popover from opening main popover
+                                event.stopPropagation()
+                              }}
+                              onPointerDown={event => {
+                                // Prevent pointer events from propagating to main popover trigger
+                                event.stopPropagation()
+                              }}
+                              onMouseDown={event => {
+                                // Prevent mouse events from propagating to main popover trigger
+                                event.stopPropagation()
+                              }}
+                            >
+                              <div className="space-y-2">
+                                <div className="px-2 py-1 text-sm font-semibold">
+                                  Selected Items ({selectedValues.length})
+                                </div>
+                                <div className="max-h-[200px] space-y-1 overflow-y-auto">
+                                  {selectedValues.map(value => {
+                                    let option: Option | undefined
+                                    if (async) {
+                                      option = reserveOptions[value]
+                                    } else {
+                                      option = options.find(
+                                        opt => opt.value === value
+                                      )
+                                    }
+                                    return (
+                                      <div
+                                        key={value}
+                                        className="group flex items-center justify-between rounded-md px-2 py-1.5 hover:bg-accent"
+                                      >
+                                        <div className="flex min-w-0 flex-1 items-center gap-2">
+                                          <div className="truncate text-xs">
+                                            {option?.label ??
+                                              value ??
+                                              "Loading..."}
+                                          </div>
+                                        </div>
+                                        <X
+                                          className={cn(
+                                            "box-content h-3 w-3 shrink-0 rounded-full p-1 text-zinc-400 opacity-0 transition-opacity group-hover:opacity-100",
+                                            disabled
+                                              ? "cursor-not-allowed"
+                                              : "cursor-pointer hover:bg-zinc-100 hover:text-primary dark:hover:bg-zinc-800"
+                                          )}
+                                          onClick={event => {
+                                            if (disabled) return
+                                            event.stopPropagation()
+                                            toggleOption(value)
+                                            // Close popover if no more overflow items
+                                            if (
+                                              selectedValues.length - 1 <=
+                                              maxCount
+                                            ) {
+                                              setIsOverflowPopoverOpen(false)
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                    )
+                                  })}
+                                </div>
+                                <div className="border-t pt-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      handleClear()
+                                      setIsOverflowPopoverOpen(false)
+                                    }}
+                                    className={cn(
+                                      "w-full rounded-md px-2 py-1.5 text-center text-xs text-destructive hover:bg-accent",
+                                      disabled &&
+                                        "cursor-not-allowed opacity-50"
+                                    )}
+                                    disabled={disabled}
+                                  >
+                                    Clear All
+                                  </button>
+                                </div>
+                              </div>
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                      </>
+                    )}
+                  </div>
+                ) : (
+                  <div className="flex max-w-full flex-1 items-center gap-1">
+                    {(() => {
+                      const selectedValue = selectedValues[0]
+                      let option: Option | undefined
+                      if (async) {
+                        option = reserveOptions[selectedValue]
+                      } else {
+                        option = options.find(
+                          opt => opt.value === selectedValue
+                        )
+                      }
+                      return (
+                        <div className="flex h-[26px] max-w-full items-center gap-1 rounded-md border border-zinc-200 px-2 py-0.5 text-zinc-600 dark:border-zinc-700 dark:text-zinc-400">
+                          <div className="flex items-center gap-1 truncate text-xs">
+                            {option?.label ?? selectedValue ?? "Loading..."}
+                          </div>
+                          <X
+                            className={cn(
+                              "box-content h-3 w-3 shrink-0 rounded-full p-1 text-zinc-500",
+                              disabled
+                                ? "cursor-not-allowed opacity-50"
+                                : "cursor-pointer hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            )}
+                            onClick={event => {
+                              if (disabled) return
+                              event.stopPropagation()
+                              handleClear()
+                            }}
+                          />
+                        </div>
+                      )
+                    })()}
+                  </div>
+                )}
+                <div className="flex items-center justify-between">
+                  {selectedValues.length > 0 && (
+                    <>
+                      <X
+                        className={cn(
+                          "ml-2 box-content h-4 w-4 shrink-0 rounded-full p-1 text-zinc-300 dark:text-zinc-500",
+                          disabled
+                            ? "cursor-not-allowed opacity-50"
+                            : "cursor-pointer hover:bg-zinc-100 hover:text-primary dark:hover:bg-zinc-800"
+                        )}
+                        onClick={event => {
+                          if (disabled) return
+                          event.stopPropagation()
+                          handleClear()
+                        }}
+                      />
+                      <Separator
+                        orientation="vertical"
+                        className="mx-2 flex h-full min-h-6"
+                      />
+                    </>
+                  )}
+                  <ChevronDown
+                    className={cn(
+                      "h-4 text-zinc-300 dark:text-zinc-500",
+                      disabled
+                        ? "cursor-not-allowed opacity-50"
+                        : "cursor-pointer hover:text-primary"
+                    )}
+                  />
+                </div>
+              </div>
+            ) : (
+              <div className="mx-auto flex w-full items-center justify-between">
+                <span className="text-sm font-normal text-zinc-500">
+                  {placeholder}
+                </span>
+                <ChevronDown
+                  className={cn(
+                    "h-4 text-zinc-300 dark:text-zinc-500",
+                    disabled
+                      ? "cursor-not-allowed opacity-50"
+                      : "cursor-pointer"
+                  )}
+                />
+              </div>
+            )}
+          </div>
+        </PopoverTrigger>
+        <PopoverContent
+          onEscapeKeyDown={() => {
+            setIsPopoverOpen(false)
+            if (clearSearchOnClose) {
+              setSearchValueState("")
+              onSearch?.("")
+            }
+          }}
+          {...{
+            ...popoverOptions,
+            className: cn(
+              "w-auto p-0 max-w-[380px]",
+              popoverOptions?.className
+            ),
+            align: "start",
+            portal: popoverOptions?.portal
+          }}
+        >
+          <Command shouldFilter={!async && !onSearch}>
+            <CommandInput
+              placeholder={searchPlaceholder}
+              value={searchValueState}
+              disabled={disabled}
+              onValueChange={(value: string) => {
+                if (disabled) return
+                setSearchValueState(value)
+                if (onSearch) {
+                  onSearch(value)
+                }
+              }}
+              onKeyDown={handleInputKeyDown}
+            />
+            <CommandList
+              ref={commandListRef}
+              onScroll={e => {
+                // Handle infinite scroll/pagination
+                if (!onLoadMore || !hasMore || isLoadingMore) return
+
+                const target = e.currentTarget
+                const scrollTop = target.scrollTop
+                const scrollHeight = target.scrollHeight
+                const clientHeight = target.clientHeight
+
+                // Trigger load more when user scrolls within 100px of bottom
+                const threshold = 100
+                if (scrollHeight - scrollTop - clientHeight < threshold) {
+                  onLoadMore()
+                }
+              }}
+            >
+              {async && error && (
+                <div className="p-4 text-center text-destructive">
+                  {error.message}
+                </div>
+              )}
+              {async && loading && options.length === 0 && (
+                <div className="flex h-full items-center justify-center py-6">
+                  <Loader
+                    color="#ffa500"
+                    style={{
+                      transform: "scale(0.38)",
+                      position: "relative",
+                      top: "-1px"
+                    }}
+                  />
+                </div>
+              )}
+              {async ? (
+                !loading &&
+                !error &&
+                options.length === 0 && (
+                  <div className="pb-4 pt-6 text-center text-xs">{`No result found.`}</div>
+                )
+              ) : (
+                <CommandEmpty>{`No result found.`}</CommandEmpty>
+              )}
+              {/* Select all - always first, outside options group */}
+              {!hideSelectAll &&
+                multiple &&
+                options.length > 0 &&
+                // Hide select all in async mode when there's a search value
+                !(async && searchValueState.trim() !== "") && (
+                  <CommandGroup>
+                    <CommandItem
+                      key="all"
+                      onSelect={() => {
+                        if (disabled) return
+                        toggleAll()
+                      }}
+                      className={
+                        disabled
+                          ? "cursor-not-allowed opacity-50"
+                          : "max-w-full cursor-pointer text-wrap"
+                      }
+                    >
+                      {(() => {
+                        // Calculate checkbox state: 'empty', 'checked', or 'indeterminate'
+                        let checkboxState: "empty" | "checked" | "indeterminate"
+                        let showIcon: boolean
+                        let IconComponent = CheckIcon
+
+                        if (async && isAllSelected) {
+                          // In async mode with all selected
+                          if (currentExcluded.length === 0) {
+                            checkboxState = "checked"
+                            showIcon = true
+                          } else {
+                            checkboxState = "indeterminate"
+                            showIcon = true
+                            IconComponent = Minus
+                          }
+                        } else {
+                          // Sync mode or async mode without all selected
+                          const currentOptionValues = options.map(
+                            option => option.value
+                          )
+                          const selectedCount = currentOptionValues.filter(
+                            value => selectedValues.includes(value)
+                          ).length
+
+                          if (selectedCount === 0) {
+                            checkboxState = "empty"
+                            showIcon = false
+                          } else if (
+                            selectedCount === currentOptionValues.length
+                          ) {
+                            checkboxState = "checked"
+                            showIcon = true
+                          } else {
+                            checkboxState = "indeterminate"
+                            showIcon = true
+                            IconComponent = Minus
+                          }
+                        }
+
+                        return (
+                          <div
+                            className={cn(
+                              "shadow-xs mr-1 flex size-4 items-center justify-center rounded-[4px] border border-primary outline-none transition-shadow",
+                              checkboxState === "checked" ||
+                                checkboxState === "indeterminate"
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "opacity-50 [&_svg]:invisible"
+                            )}
+                          >
+                            {showIcon && (
+                              <IconComponent className="size-3.5 text-white dark:text-black" />
+                            )}
+                          </div>
+                        )
+                      })()}
+                      <span>Select all</span>
+                    </CommandItem>
+                  </CommandGroup>
+                )}
+              <CommandGroup>
+                {options.map((option, index) => {
+                  // In async mode with all selected, check if item is NOT excluded
+                  // In normal mode, check if item is in selectedValues
+                  const isSelected = isAllSelected
+                    ? !currentExcluded.includes(option.value)
+                    : selectedValues.includes(option.value)
+                  return (
+                    <CommandItem
+                      key={option.value}
+                      onSelect={() => {
+                        if (disabled) return
+                        toggleOption(option.value)
+                      }}
+                      className={cn(
+                        disabled
+                          ? "cursor-not-allowed text-xs opacity-50"
+                          : "cursor-pointer text-xs",
+                        !multiple &&
+                          isSelected &&
+                          "bg-accent text-accent-foreground"
+                      )}
+                    >
+                      {multiple ? (
+                        <div
+                          className={cn(
+                            "shadow-xs mr-1 flex size-4 items-center justify-center rounded-[4px] border border-primary outline-none transition-shadow",
+                            isSelected
+                              ? "border-primary bg-primary text-primary-foreground"
+                              : "opacity-50 [&_svg]:invisible"
+                          )}
+                        >
+                          <CheckIcon className="size-3.5 text-white dark:text-black" />
+                        </div>
+                      ) : (
+                        isSelected && (
+                          <CheckIcon className="mr-1 size-4 text-primary" />
+                        )
+                      )}
+
+                      {labelFunc ? (
+                        labelFunc(option, isSelected, index)
+                      ) : (
+                        <span>{option.label}</span>
+                      )}
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+              {hasMore && (
+                <CommandGroup>
+                  <div className="flex justify-center py-2">
+                    {isLoadingMore ? (
+                      <Loader
+                        color="#ffa500"
+                        style={{
+                          transform: "scale(0.38)",
+                          position: "relative",
+                          top: "-1px"
+                        }}
+                      />
+                    ) : (
+                      <span className="text-xs text-muted-foreground">
+                        Scroll for more...
+                      </span>
+                    )}
+                  </div>
+                </CommandGroup>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
+    )
+  }
+)
+
+MultiAsyncSelect.displayName = "MultiAsyncSelect"
+```
+
+---
+
+## Data Models
+
+Before diving into examples, let's define our data models:
+
+```tsx title="app/models/api.model.ts"
+interface Pagination {
+  total: number
+  currentPage: number
+  perPage: number
+  pageCount: number
+}
+
+export interface PaginatedResponse<T> {
+  data: T[]
+  message: string
+  pagination: Pagination
+}
+```
+
+```tsx title="app/bloggers/models/blogger.model.ts"
+export interface Blogger {
+  _id: string
+  name: string
+  bio: string
+  image?: string
+  createdAt: string
+  socialLinks: {
+    platform: string
+    url: string
+  }[]
+}
+```
+
+---
+
+## Examples
+
+### 1. Async Big Page Size Example
+
+This example demonstrates fetching all data at once with a large page size. The component handles client-side filtering since all data is available on the frontend.
+
+<Tabs items={['Form - Single & Multi', 'Non-Form - Multi']}>
+  <Tab value="Form - Single & Multi">
+```tsx title="app/bloggers/components/async-big-page-size-example/async-big-page-size-example-form.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useQuery } from "@tanstack/react-query"
+import Image from "next/image"
+import { useState } from "react"
+import { Controller, useForm } from "react-hook-form"
+import { z } from "zod"
+import type { Blogger } from "@/app/bloggers/models/blogger.model"
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select"
+import { fetchBloggers } from "@/app/lib/services/blogger.service"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+
+// Large page size to get all data at once
+const LARGE_PAGE_SIZE = 1000;
+
+export const AsyncBigPageSizeExampleForm = () => {
+  const [isSingleRequired, setIsSingleRequired] = useState(false);
+  const [isMultiRequired, setIsMultiRequired] = useState(false);
+
+const asyncSearchableFormSchema = z.object({
+singleSelect: isSingleRequired
+? z.string("Please select a blogger").min(1, "Please select a blogger")
+: z.string().optional(),
+multiSelect: isMultiRequired
+? z.array(z.string()).min(1, "Please select at least one blogger")
+: z.array(z.string()),
+});
+
+type AsyncSearchableForm = z.infer<typeof asyncSearchableFormSchema>;
+
+const form = useForm<AsyncSearchableForm>({
+resolver: zodResolver(asyncSearchableFormSchema),
+defaultValues: {
+singleSelect: undefined,
+multiSelect: [],
+},
+});
+
+// Fetch all bloggers once with large page size
+const { isPending, data, error } = useQuery({
+queryKey: ["bloggers-all"],
+queryFn: async () => {
+return await fetchBloggers({
+perPage: LARGE_PAGE_SIZE,
+});
+},
+});
+
+const OPTIONS =
+data?.data.map((blogger: Blogger) => ({
+label: (
+
+<div className="flex items-center gap-2">
+  {blogger.image && (
+    <Image
+      src={blogger.image}
+      alt={blogger.name}
+      width={20}
+      height={20}
+      className="rounded-full"
+    />
+  )}
+  <span>{blogger.name}</span>
+</div>
+), value: blogger.\_id, })) || [];
+
+const onSubmit = (data: AsyncSearchableForm) => {
+console.log("Form submitted:", data);
+};
+
+return (
+
+<form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
+{/* Single Select */}
+<div className="space-y-2">
+<div className="flex items-center gap-2 pb-2">
+<Switch
+            id="single-required-toggle"
+            checked={isSingleRequired}
+            onCheckedChange={setIsSingleRequired}
+          />
+<Label htmlFor="single-required-toggle" className="cursor-pointer">
+Single select required
+</Label>
+</div>
+<Label htmlFor="single-select">
+Single Select{" "}
+{isSingleRequired && <span className="text-destructive">\*</span>}
+</Label>
+<Controller
+name="singleSelect"
+control={form.control}
+render={({ field, fieldState }) => (
+<div className="space-y-1">
+<MultiAsyncSelect
+options={OPTIONS}
+loading={isPending}
+error={error}
+multiple={false}
+placeholder="Select a blogger..."
+value={field.value}
+onValueChange={(value) => {
+const newValue =
+typeof value === "string" ? value : undefined;
+field.onChange(newValue);
+}}
+/>
+{fieldState.error && (
+<p className="text-sm text-destructive">
+{fieldState.error.message}
+</p>
+)}
+</div>
+)}
+/>
+</div>
+
+      {/* Multi Select */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 pb-2">
+          <Switch
+            id="multi-required-toggle"
+            checked={isMultiRequired}
+            onCheckedChange={setIsMultiRequired}
+          />
+          <Label htmlFor="multi-required-toggle" className="cursor-pointer">
+            Multi select required
+          </Label>
+        </div>
+        <Label htmlFor="multi-select">
+          Multi Select{" "}
+          {isMultiRequired && <span className="text-destructive">*</span>}
+        </Label>
+        <Controller
+          name="multiSelect"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <div className="space-y-1">
+              <MultiAsyncSelect
+                options={OPTIONS}
+                loading={isPending}
+                error={error}
+                multiple={true}
+                placeholder="Select bloggers..."
+                value={field.value}
+                onValueChange={(value) => {
+                  const newValue = Array.isArray(value) ? value : [];
+                  field.onChange(newValue);
+                }}
+              />
+              {fieldState.error && (
+                <p className="text-sm text-destructive">
+                  {fieldState.error.message}
+                </p>
+              )}
+            </div>
+          )}
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <Button type="submit">Submit Form</Button>
+        <Button type="button" variant="outline" onClick={() => form.reset()}>
+          Reset
+        </Button>
+      </div>
+
+      {/* Display form values */}
+      <div className="rounded-lg border p-4">
+        <h4 className="mb-2 font-semibold">Form Values:</h4>
+        <pre className="text-sm">{JSON.stringify(form.watch(), null, 2)}</pre>
+      </div>
+    </form>
+
+);
+};
+
+````
+
+  </Tab>
+  <Tab value="Non-Form - Multi">
+```tsx title="app/bloggers/components/async-big-page-size-example/async-big-page-size-example-non-form.tsx"
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import Image from "next/image";
+import { useState } from "react";
+import type { Blogger } from "@/app/bloggers/models/blogger.model";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+
+// Large page size to get all data at once
+const LARGE_PAGE_SIZE = 1000;
+
+export const AsyncBigPageSizeExampleNonForm = () => {
+  const [multiSelectValue, setMultiSelectValue] = useState<string[]>([]);
+
+  // Fetch all bloggers once with large page size
+  const { isPending, data, error } = useQuery({
+    queryKey: ["bloggers-all"],
+    queryFn: async () => {
+      return await fetchBloggers({
+        perPage: LARGE_PAGE_SIZE,
+      });
+    },
+  });
+
+  const OPTIONS =
+    data?.data.map((blogger: Blogger) => ({
+      label: (
+        <div className="flex items-center gap-2">
+          {blogger.image && (
+            <Image
+              src={blogger.image}
+              alt={blogger.name}
+              width={20}
+              height={20}
+              className="rounded-full"
+            />
+          )}
+          <span>{blogger.name}</span>
+        </div>
+      ),
+      value: blogger._id,
+    })) || [];
+
+  const handleSubmit = () => {
+    const data = {
+      multiSelect: multiSelectValue,
+    };
+    console.log("Data submitted:", data);
+  };
+
+  const handleReset = () => {
+    setMultiSelectValue([]);
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Multi Select */}
+      <div className="space-y-2">
+        <Label>Multi Select</Label>
+        <MultiAsyncSelect
+          options={OPTIONS}
+          loading={isPending}
+          error={error}
+          multiple={true}
+          placeholder="Select bloggers..."
+          value={multiSelectValue}
+          onValueChange={(value) => {
+            const newValue = Array.isArray(value) ? value : [];
+            setMultiSelectValue(newValue);
+          }}
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <Button onClick={handleSubmit}>Submit</Button>
+        <Button variant="outline" onClick={handleReset}>
+          Reset
+        </Button>
+      </div>
+
+      {/* Display values */}
+      <div className="rounded-lg border p-4">
+        <h4 className="mb-2 font-semibold">Selected Values:</h4>
+        <pre className="text-sm">
+          {JSON.stringify(
+            {
+              multiSelect: multiSelectValue,
+            },
+            null,
+            2,
+          )}
+        </pre>
+      </div>
+    </div>
+  );
+};
+````
+
+  </Tab>
+</Tabs>
+
+**Key Features:**
+
+- Fetches all data once with large page size (1000 items)
+- Client-side filtering (no backend search)
+- No pagination needed
+- Standard "Select All" behavior (returns array of selected values)
+
+---
+
+### 2. Async Select All Example
+
+This example demonstrates the async "select all" pattern where selecting all items returns `"__ALL__"` and excluded items are tracked separately.
+
+<Tabs items={['Form', 'Non-Form']}>
+  <Tab value="Form">
+```tsx title="app/bloggers/components/async-select-all-example/async-select-all-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
+import { LucideAirplay, LucideAlarmClockCheck } from "lucide-react";
+import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { useDebouncedCallback } from "use-debounce";
+import { z } from "zod";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { cn } from "@/lib/utils";
+
+export const AsyncSelectAllFormExample = () => {
+  const [searchString, setSearchString] = useState("");
+  const [isRequired, setIsRequired] = useState(false);
+
+const formSchema = z.object({
+selected: isRequired
+? z.union([z.string(), z.array(z.string())]).refine(
+(val) => {
+if (typeof val === "string")
+return val === "**ALL**" || val.length > 0;
+return Array.isArray(val) && val.length > 0;
+},
+{ message: "Please select at least one blogger" },
+)
+: z.union([z.string(), z.array(z.string())]),
+excluded: z.array(z.string()),
+});
+
+type FormData = z.infer<typeof formSchema>;
+
+const form = useForm<FormData>({
+resolver: zodResolver(formSchema),
+defaultValues: { selected: [], excluded: [] },
+});
+
+const { isPending, data, error } = useQuery({
+queryKey: ["bloggers", searchString],
+queryFn: async () => {
+return await fetchBloggers({ name: searchString });
+},
+});
+
+const OPTIONS =
+data?.data.map((blogger) => ({
+label: blogger.name,
+value: blogger.\_id,
+})) || [];
+
+const handleSearch = useDebouncedCallback((value: string) => {
+setSearchString(value);
+}, 100);
+
+const selected = form.watch("selected");
+const excluded = form.watch("excluded");
+const allSelected = typeof selected === "string" && selected === "**ALL**";
+
+return (
+
+<form
+  onSubmit={form.handleSubmit(data => {
+    console.log("Form submitted:", data)
+  })}
+  className="space-y-4"
+>
+  <div className="flex items-center gap-2 pb-2">
+    <Switch
+      id="required-toggle"
+      checked={isRequired}
+      onCheckedChange={setIsRequired}
+    />
+    <Label htmlFor="required-toggle" className="cursor-pointer">
+      Required field
+    </Label>
+  </div>
+  <div
+    className={cn(
+      "flex flex-col items-center justify-center border border-zinc-200 rounded-md dark:border-zinc-800 p-4"
+    )}
+  >
+    <Controller
+      name="selected"
+      control={form.control}
+      render={({ field, fieldState }) => (
+        <Controller
+          name="excluded"
+          control={form.control}
+          render={({ field: excludedField }) => (
+            <div className="space-y-1 w-full">
+              <Label className="block mb-2">
+                Select bloggers{" "}
+                {isRequired && <span className="text-destructive">\*</span>}
+              </Label>
+              <MultiAsyncSelect
+                async
+                loading={isPending}
+                error={error}
+                options={OPTIONS}
+                value={field.value}
+                excluded={excludedField.value}
+                onValueChange={field.onChange}
+                onExcludedChange={excludedField.onChange}
+                onSearch={handleSearch}
+                className="w-[480px]"
+                searchPlaceholder="Search bloggers..."
+                placeholder="Select bloggers..."
+                maxCount={3}
+                labelFunc={(option, isSelected, index) => (
+                  <div
+                    className={cn(
+                      "flex items-center gap-x-1",
+                      isSelected && "text-blue-500"
+                    )}
+                  >
+                    {index % 2 ? (
+                      <LucideAirplay className="scale-75" />
+                    ) : (
+                      <LucideAlarmClockCheck className="scale-75" />
+                    )}
+                    <span>{option.label}</span>
+                    <span className="text-xs text-gray-500">
+                      ({option.value})
+                    </span>
+                  </div>
+                )}
+              />
+              {fieldState.error && (
+                <p className="text-sm text-destructive mt-2">
+                  {fieldState.error.message}
+                </p>
+              )}
+            </div>
+          )}
+        />
+      )}
+    />
+  </div>
+  <div className="text-xs text-muted-foreground space-y-1">
+    <p>
+      <strong>Value sent to backend:</strong>{" "}
+      <code className="bg-muted px-1 py-0.5 rounded">
+        {JSON.stringify(selected)}
+      </code>
+    </p>
+    {allSelected && excluded.length > 0 && (
+      <p>
+        <strong>Excluded items:</strong>{" "}
+        <code className="bg-muted px-1 py-0.5 rounded">
+          {JSON.stringify(excluded)}
+        </code>
+      </p>
+    )}
+    <p>
+      <strong>Status:</strong>{" "}
+      {allSelected
+        ? `All selected${
+            excluded.length > 0 ? ` (${excluded.length} excluded)` : ""
+          }`
+        : `${Array.isArray(selected) ? selected.length : 0} item(s) selected`}
+    </p>
+    <div className="flex items-center gap-2">
+      <Button type="submit" variant="outline" size="sm">
+        Submit Form
+      </Button>
+    </div>
+  </div>
+</form>
+); };
+
+````
+
+  </Tab>
+  <Tab value="Non-Form">
+```tsx title="app/bloggers/components/async-select-all-example/async-select-all-non-form-example.tsx"
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { LucideAirplay, LucideAlarmClockCheck } from "lucide-react";
+import { useState } from "react";
+import { useDebouncedCallback } from "use-debounce";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+
+export const AsyncSelectAllNonFormExample = () => {
+  const [searchString, setSearchString] = useState("");
+  const [selectedValues, setSelectedValues] = useState<string[] | string>([]);
+  const [excluded, setExcluded] = useState<string[]>([]);
+
+  const { isPending, data, error } = useQuery({
+    queryKey: ["bloggers", searchString],
+    queryFn: async () => {
+      return await fetchBloggers({ name: searchString });
+    },
+  });
+
+  const OPTIONS =
+    data?.data.map((blogger) => ({
+      label: blogger.name,
+      value: blogger._id,
+    })) || [];
+
+  const handleSearch = useDebouncedCallback((value: string) => {
+    setSearchString(value);
+  }, 100);
+
+  const handleValueChange = (value: string[] | string | undefined) => {
+    setSelectedValues(value ?? []);
+  };
+
+  const handleExcludedChange = (excludedItems: string[]) => {
+    setExcluded(excludedItems);
+  };
+
+  // Check if all is selected
+  const isAllSelected =
+    typeof selectedValues === "string" && selectedValues === "__ALL__";
+
+  return (
+    <>
+      <div
+        className={cn(
+          "border border-zinc-200 rounded-md dark:border-zinc-800 p-4",
+        )}
+      >
+        <MultiAsyncSelect
+          async
+          loading={isPending}
+          error={error}
+          options={OPTIONS}
+          value={selectedValues}
+          excluded={excluded}
+          onValueChange={handleValueChange}
+          onExcludedChange={handleExcludedChange}
+          onSearch={handleSearch}
+          className="w-[480px]"
+          searchPlaceholder="Search bloggers..."
+          placeholder="Select bloggers..."
+          maxCount={3}
+          labelFunc={(option, isSelected, index) => (
+            <div
+              className={cn(
+                "flex items-center gap-x-1",
+                isSelected && "text-blue-500",
+              )}
+            >
+              {index % 2 ? (
+                <LucideAirplay className="scale-75" />
+              ) : (
+                <LucideAlarmClockCheck className="scale-75" />
+              )}
+              <span>{option.label}</span>
+              <span className="text-xs text-gray-500">({option.value})</span>
+            </div>
+          )}
+        />
+      </div>
+      <div className="text-xs text-muted-foreground space-y-1">
+        <p className="break-all">
+          <strong>Selected values:</strong>{" "}
+          <code className="bg-muted px-1 py-0.5 rounded">
+            {JSON.stringify(selectedValues)}
+          </code>
+        </p>
+        {isAllSelected && excluded.length > 0 && (
+          <p>
+            <strong>Excluded items:</strong>{" "}
+            <code className="bg-muted px-1 py-0.5 rounded">
+              {JSON.stringify(excluded)}
+            </code>
+          </p>
+        )}
+        <p>
+          <strong>Status:</strong>{" "}
+          {isAllSelected
+            ? `All selected${excluded.length > 0 ? ` (${excluded.length} excluded)` : ""}`
+            : `${
+                Array.isArray(selectedValues) ? selectedValues.length : 0
+              } item(s) selected`}
+        </p>
+        <p className="text-xs">
+          <strong>Try it:</strong> Click "Select all" to select all items, then
+          unselect some items to see them added to the excluded array.
+        </p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => console.log(selectedValues)}
+        >
+          Log form values
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => console.log(excluded)}
+        >
+          Log Excluded values
+        </Button>
+      </div>
+    </>
+  );
+};
+````
+
+  </Tab>
+</Tabs>
+
+**Key Features:**
+
+- When "Select all" is clicked, `onValueChange` receives `"__ALL__"`
+- When items are unselected while all is selected, they're added to the `excluded` array
+- Backend receives: `{ selected: "__ALL__", excluded: ["id1", "id2"] }`
+- Backend interprets this as "all items except id1 and id2"
+
+---
+
+### 3. Edit Mode Example
+
+This example demonstrates handling edit mode where the backend returns only IDs of selected items. The component fetches missing selected items that aren't in the initial API response.
+
+<Tabs items={['Form - Single', 'Form - Multi', 'Non-Form - Single', 'Non-Form - Multi', 'Hook', 'Utils']}>
+  <Tab value="Form - Single">
+```tsx title="app/bloggers/components/edit-mode-example/single-select-edit-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod"
+import { useQuery } from "@tanstack/react-query"
+import Image from "next/image"
+import { useState } from "react"
+import { Controller, useForm } from "react-hook-form"
+import { useDebouncedCallback } from "use-debounce"
+import { z } from "zod"
+import {
+  MultiAsyncSelect,
+  type Option
+} from "@/app/components/ui/multi-async-select"
+import { fetchBloggers } from "@/app/lib/services/blogger.service"
+import UserAvatar from "@/assets/user.webp"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { useFetchMissingBloggers } from "./hooks/use-fetch-missing-bloggers"
+import { mergeOptions } from "./utils"
+
+interface SingleSelectEditFormExampleProps {
+initialSelectedId: string;
+}
+
+export const SingleSelectEditFormExample = ({
+  initialSelectedId,
+}: SingleSelectEditFormExampleProps) => {
+  const [searchString, setSearchString] = useState("");
+  const [isRequired, setIsRequired] = useState(false);
+
+const singleSelectSchema = z.object({
+selected: isRequired
+? z.string("Please select a blogger").min(1, "Please select a blogger")
+: z.string().nullable().optional(),
+});
+
+type SingleSelectForm = z.infer<typeof singleSelectSchema>;
+
+const form = useForm<SingleSelectForm>({
+resolver: zodResolver(singleSelectSchema),
+defaultValues: {
+selected: initialSelectedId, // Keep the default value
+},
+});
+
+// Fetch all bloggers for the dropdown
+const { isPending, data, error } = useQuery({
+queryKey: ["bloggers", searchString],
+queryFn: async () => {
+return await fetchBloggers({ name: searchString });
+},
+});
+
+const loadedOptionIds = new Set(
+data?.data.map((blogger) => blogger.\_id) || [],
+);
+
+// Watch the current form value to fetch missing blogger if needed
+const currentSelectedId = form.watch("selected");
+// Handle both null and undefined as empty
+const selectedIds = currentSelectedId ? [currentSelectedId] : [];
+
+const { fetchedMissingOptions, isFetchingMissing } = useFetchMissingBloggers({
+selectedIds,
+loadedOptionIds,
+searchString,
+isPending,
+data,
+});
+
+// Prepare options
+const loadedOptions: Option[] =
+data?.data.map((blogger) => ({
+label: (
+
+<div className="flex items-center gap-x-1">
+  <Image
+    src={blogger.image || UserAvatar}
+    alt={blogger.name}
+    width={20}
+    height={20}
+  />
+  <span>{blogger.name}</span>
+</div>
+), value: blogger.\_id, })) || [];
+
+const OPTIONS = mergeOptions(
+loadedOptions,
+fetchedMissingOptions,
+searchString,
+);
+
+const handleSearch = useDebouncedCallback((value: string) => {
+setSearchString(value);
+}, 100);
+
+return (
+
+<form
+onSubmit={form.handleSubmit((data) => {
+console.log("Form submitted:", data);
+})}
+className="space-y-4" >
+<div className="flex items-center gap-2 pb-2">
+<Switch
+          id="required-toggle-1"
+          checked={isRequired}
+          onCheckedChange={setIsRequired}
+        />
+<Label htmlFor="required-toggle-1" className="cursor-pointer">
+Required field
+</Label>
+</div>
+<div className="space-y-2">
+<Label>
+Select a blogger{" "}
+{isRequired && <span className="text-destructive">\*</span>}
+</Label>
+<Controller
+name="selected"
+control={form.control}
+render={({ field, fieldState }) => (
+<div className="space-y-1">
+<MultiAsyncSelect
+async
+loading={isPending || isFetchingMissing}
+error={error}
+options={OPTIONS}
+value={field.value ?? undefined}
+onValueChange={(value) => {
+// Use null for cleared state (not undefined) to prevent reverting to defaultValues
+const newValue = typeof value === "string" ? value : null;
+field.onChange(newValue);
+}}
+onSearch={handleSearch}
+placeholder="Select a blogger..."
+multiple={false}
+searchPlaceholder="Search bloggers..."
+/>
+{fieldState.error && (
+<p className="text-sm text-destructive">
+{fieldState.error.message}
+</p>
+)}
+</div>
+)}
+/>
+</div>
+
+      <div className="flex gap-2">
+        <Button type="submit" size="sm">
+          Submit Form
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => form.reset()}
+        >
+          Reset
+        </Button>
+      </div>
+    </form>
+
+);
+};
+
+````
+
+  </Tab>
+  <Tab value="Form - Multi">
+```tsx title="app/bloggers/components/edit-mode-example/multi-select-edit-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { useDebouncedCallback } from "use-debounce";
+import { z } from "zod";
+import {
+  MultiAsyncSelect,
+  type Option,
+} from "@/app/components/ui/multi-async-select";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { useFetchMissingBloggers } from "./hooks/use-fetch-missing-bloggers";
+import { mergeOptions } from "./utils";
+
+interface MultiSelectEditFormExampleProps {
+  initialSelectedIds: string[];
+}
+
+export const MultiSelectEditFormExample = ({
+  initialSelectedIds,
+}: MultiSelectEditFormExampleProps) => {
+  const [searchString, setSearchString] = useState("");
+  const [isRequired, setIsRequired] = useState(false);
+
+  const multiSelectSchema = z.object({
+    selected: isRequired
+      ? z.union([z.string(), z.array(z.string())]).refine(
+          (val) => {
+            if (typeof val === "string")
+              return val === "__ALL__" || val.length > 0;
+            return Array.isArray(val) && val.length > 0;
+          },
+          { message: "Please select at least one blogger" },
+        )
+      : z.union([z.string(), z.array(z.string())]),
+    excluded: z.array(z.string()),
+  });
+
+  type MultiSelectForm = z.infer<typeof multiSelectSchema>;
+
+  const form = useForm<MultiSelectForm>({
+    resolver: zodResolver(multiSelectSchema),
+    defaultValues: {
+      selected: initialSelectedIds,
+      excluded: [],
+    },
+  });
+
+  // Fetch all bloggers for the dropdown
+  const { isPending, data, error } = useQuery({
+    queryKey: ["bloggers", searchString],
+    queryFn: async () => {
+      return await fetchBloggers({ name: searchString });
+    },
+  });
+
+  const loadedOptionIds = new Set(
+    data?.data.map((blogger) => blogger._id) || [],
+  );
+
+  const { fetchedMissingOptions, isFetchingMissing } = useFetchMissingBloggers({
+    selectedIds: initialSelectedIds,
+    loadedOptionIds,
+    searchString,
+    isPending,
+    data,
+  });
+
+  // Prepare options
+  const loadedOptions: Option[] =
+    data?.data.map((blogger) => ({
+      label: blogger.name,
+      value: blogger._id,
+    })) || [];
+
+  const OPTIONS = mergeOptions(
+    loadedOptions,
+    fetchedMissingOptions,
+    searchString,
+  );
+
+  const handleSearch = useDebouncedCallback((value: string) => {
+    setSearchString(value);
+  }, 100);
+
+  return (
+    <form
+      onSubmit={form.handleSubmit((data) => {
+        console.log("Form submitted:", data);
+      })}
+      className="space-y-4"
+    >
+      <div className="flex items-center gap-2 pb-2">
+        <Switch
+          id="required-toggle-2"
+          checked={isRequired}
+          onCheckedChange={setIsRequired}
+        />
+        <Label htmlFor="required-toggle-2" className="cursor-pointer">
+          Required field
+        </Label>
+      </div>
+      <div className="space-y-2">
+        <Label>
+          Select bloggers{" "}
+          {isRequired && <span className="text-destructive">*</span>}
+        </Label>
+        <Controller
+          name="selected"
+          control={form.control}
+          render={({ field, fieldState }) => (
+            <Controller
+              name="excluded"
+              control={form.control}
+              render={({ field: excludedField }) => (
+                <div className="space-y-1">
+                  <MultiAsyncSelect
+                    async
+                    loading={isPending || isFetchingMissing}
+                    error={error}
+                    options={OPTIONS}
+                    value={field.value}
+                    excluded={excludedField.value}
+                    onValueChange={(value) => {
+                      // Handle async select all case (returns "__ALL__" string)
+                      if (value === "__ALL__") {
+                        field.onChange(value);
+                        return;
+                      }
+                      // Handle normal array case
+                      const newValue = Array.isArray(value) ? value : [];
+                      field.onChange(newValue);
+                    }}
+                    onExcludedChange={excludedField.onChange}
+                    onSearch={handleSearch}
+                    placeholder="Select bloggers..."
+                    multiple={true}
+                    searchPlaceholder="Search bloggers..."
+                  />
+                  {fieldState.error && (
+                    <p className="text-sm text-destructive">
+                      {fieldState.error.message}
+                    </p>
+                  )}
+                </div>
+              )}
+            />
+          )}
+        />
+      </div>
+
+      <div className="flex gap-2">
+        <Button type="submit" size="sm">
+          Submit Form
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => form.reset()}
+        >
+          Reset
+        </Button>
+      </div>
+    </form>
+  );
+};
+````
+
+  </Tab>
+  <Tab value="Non-Form - Single">
+```tsx title="app/bloggers/components/edit-mode-example/single-select-edit-non-form-example.tsx"
+"use client";
+
+import { useQuery } from "@tanstack/react-query"
+import Image from "next/image"
+import { useState } from "react"
+import { useDebouncedCallback } from "use-debounce"
+import {
+  MultiAsyncSelect,
+  type Option
+} from "@/app/components/ui/multi-async-select"
+import { fetchBloggers } from "@/app/lib/services/blogger.service"
+import UserAvatar from "@/assets/user.webp"
+import { Button } from "@/components/ui/button"
+import { Label } from "@/components/ui/label"
+import { useFetchMissingBloggers } from "./hooks/use-fetch-missing-bloggers"
+import { mergeOptions } from "./utils"
+
+interface SingleSelectEditNonFormExampleProps {
+initialSelectedId: string;
+}
+
+export const SingleSelectEditNonFormExample = ({
+  initialSelectedId,
+}: SingleSelectEditNonFormExampleProps) => {
+  const [searchString, setSearchString] = useState("");
+  const [selectedValue, setSelectedValue] = useState<string | null | undefined>(
+    initialSelectedId,
+  );
+
+// Fetch all bloggers for the dropdown
+const { isPending, data, error } = useQuery({
+queryKey: ["bloggers", searchString],
+queryFn: async () => {
+return await fetchBloggers({ name: searchString });
+},
+});
+
+const loadedOptionIds = new Set(
+data?.data.map((blogger) => blogger.\_id) || [],
+);
+
+// Use current selected value (not initial) to fetch missing blogger if needed
+const selectedIds = selectedValue ? [selectedValue] : [];
+
+const { fetchedMissingOptions, isFetchingMissing } = useFetchMissingBloggers({
+selectedIds,
+loadedOptionIds,
+searchString,
+isPending,
+data,
+});
+
+// Prepare options
+const loadedOptions: Option[] =
+data?.data.map((blogger) => ({
+label: (
+
+<div className="flex items-center gap-x-1">
+  <Image
+    src={blogger.image || UserAvatar}
+    alt={blogger.name}
+    width={20}
+    height={20}
+  />
+  <span>{blogger.name}</span>
+</div>
+), value: blogger.\_id, })) || [];
+
+const OPTIONS = mergeOptions(
+loadedOptions,
+fetchedMissingOptions,
+searchString,
+);
+
+const handleSearch = useDebouncedCallback((value: string) => {
+setSearchString(value);
+}, 100);
+
+const handleValueChange = (value: string | string[] | undefined) => {
+// Use null for cleared state to maintain consistent behavior
+const newValue = typeof value === "string" ? value : null;
+setSelectedValue(newValue);
+};
+
+return (
+
+<div className="space-y-4">
+<div className="space-y-2">
+<Label>Select a blogger</Label>
+<MultiAsyncSelect
+async
+loading={isPending || isFetchingMissing}
+error={error}
+options={OPTIONS}
+value={selectedValue ?? undefined}
+onValueChange={handleValueChange}
+onSearch={handleSearch}
+placeholder="Select a blogger..."
+multiple={false}
+searchPlaceholder="Search bloggers..."
+/>
+</div>
+
+      <div className="p-3 bg-muted rounded-md">
+        <p className="text-sm font-medium mb-1">Selected Value:</p>
+        <code className="text-xs">
+          {selectedValue ? JSON.stringify(selectedValue, null, 2) : "None"}
+        </code>
+      </div>
+
+      <Button
+        onClick={() => {
+          console.log("Single select value:", selectedValue);
+        }}
+        variant="outline"
+        size="sm"
+      >
+        Log Value
+      </Button>
+    </div>
+
+);
+};
+
+````
+
+  </Tab>
+  <Tab value="Non-Form - Multi">
+```tsx title="app/bloggers/components/edit-mode-example/multi-select-edit-non-form-example.tsx"
+"use client";
+
+import { useQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useDebouncedCallback } from "use-debounce";
+import {
+  MultiAsyncSelect,
+  type Option,
+} from "@/app/components/ui/multi-async-select";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { useFetchMissingBloggers } from "./hooks/use-fetch-missing-bloggers";
+import { mergeOptions } from "./utils";
+
+interface MultiSelectEditNonFormExampleProps {
+  initialSelectedIds: string[];
+}
+
+export const MultiSelectEditNonFormExample = ({
+  initialSelectedIds,
+}: MultiSelectEditNonFormExampleProps) => {
+  const [searchString, setSearchString] = useState("");
+  const [selectedValues, setSelectedValues] =
+    useState<string[]>(initialSelectedIds);
+  const [excluded, setExcluded] = useState<string[]>([]);
+
+  // Fetch all bloggers for the dropdown
+  const { isPending, data, error } = useQuery({
+    queryKey: ["bloggers", searchString],
+    queryFn: async () => {
+      return await fetchBloggers({ name: searchString });
+    },
+  });
+
+  const loadedOptionIds = new Set(
+    data?.data.map((blogger) => blogger._id) || [],
+  );
+
+  const { fetchedMissingOptions, isFetchingMissing } = useFetchMissingBloggers({
+    selectedIds: initialSelectedIds,
+    loadedOptionIds,
+    searchString,
+    isPending,
+    data,
+  });
+
+  // Prepare options
+  const loadedOptions: Option[] =
+    data?.data.map((blogger) => ({
+      label: blogger.name,
+      value: blogger._id,
+    })) || [];
+
+  const OPTIONS = mergeOptions(loadedOptions, fetchedMissingOptions, searchString);
+
+  const handleSearch = useDebouncedCallback((value: string) => {
+    setSearchString(value);
+  }, 100);
+
+  const handleValueChange = (value: string[] | string | undefined) => {
+    // Handle async select all case (returns "__ALL__" string)
+    if (typeof value === "string" && value === "__ALL__") {
+      setSelectedValues([value]);
+      return;
+    }
+    // Handle normal array case
+    const newValue = Array.isArray(value) ? value : [];
+    setSelectedValues(newValue);
+  };
+
+  return (
+    <div className="space-y-4">
+      <div className="space-y-2">
+        <Label>Select bloggers</Label>
+        <MultiAsyncSelect
+          async
+          loading={isPending || isFetchingMissing}
+          error={error}
+          options={OPTIONS}
+          value={selectedValues}
+          excluded={excluded}
+          onValueChange={handleValueChange}
+          onExcludedChange={setExcluded}
+          onSearch={handleSearch}
+          placeholder="Select bloggers..."
+          multiple={true}
+          searchPlaceholder="Search bloggers..."
+        />
+      </div>
+
+      <div className="p-3 bg-muted rounded-md">
+        <p className="text-sm font-medium mb-1">Selected Values:</p>
+        <code className="text-xs">
+          {selectedValues.length > 0
+            ? JSON.stringify(selectedValues, null, 2)
+            : "None"}
+        </code>
+      </div>
+
+      <Button
+        onClick={() => {
+          console.log("Multi select values:", selectedValues);
+        }}
+        variant="outline"
+        size="sm"
+      >
+        Log Value
+      </Button>
+    </div>
+  );
+};
+````
+
+  </Tab>
+  <Tab value="Hook">
+```tsx title="app/bloggers/components/edit-mode-example/hooks/use-fetch-missing-bloggers.ts"
+import { useQuery } from "@tanstack/react-query";
+import { useRef, useState } from "react";
+import type { Option } from "@/app/components/ui/multi-async-select";
+import { fetchBloggersByIds } from "@/app/lib/services/blogger.service";
+
+interface UseFetchMissingBloggersOptions {
+selectedIds: string[]; // For single select, pass [id] or []
+loadedOptionIds: Set<string>;
+searchString: string;
+isPending: boolean;
+data: { data: Array<{ \_id: string }> } | undefined;
+}
+
+export const useFetchMissingBloggers = ({
+  selectedIds,
+  loadedOptionIds,
+  searchString,
+  isPending,
+  data,
+}: UseFetchMissingBloggersOptions) => {
+  // Track which IDs we've already fetched/loaded to avoid re-fetching
+  const fetchedIdsRef = useRef<Set<string>>(new Set());
+  const initialLoadDoneRef = useRef(false);
+  // Store fetched missing options in state so they persist across search changes
+  const [fetchedMissingOptions, setFetchedMissingOptions] = useState<Option[]>(
+    [],
+  );
+
+// Update fetchedIdsRef when data loads (add all loaded IDs to the set)
+if (data?.data) {
+data.data.forEach((blogger) => {
+fetchedIdsRef.current.add(blogger.\_id);
+});
+}
+
+// Fetch missing selected IDs ONLY on initial load (when searchString is empty)
+// Don't re-fetch IDs that are already in fetchedIdsRef
+const missingIds = (() => {
+// Only calculate missing IDs on initial load (empty search)
+if (!data || searchString !== "" || initialLoadDoneRef.current) return [];
+
+    // Handle empty selectedIds array
+    if (selectedIds.length === 0) return [];
+
+    // Find IDs that are selected but not in loaded data AND not already fetched
+    return selectedIds.filter(
+      (id) => !loadedOptionIds.has(id) && !fetchedIdsRef.current.has(id),
+    );
+
+})();
+
+const { data: missingData, isPending: isFetchingMissing } = useQuery({
+queryKey: [
+"bloggers-by-ids",
+[...selectedIds].sort((a, b) => a.localeCompare(b)).join(","),
+], // Use stable key
+queryFn: async () => {
+const result = await fetchBloggersByIds(missingIds);
+// Mark these IDs as fetched
+missingIds.forEach((id) => {
+fetchedIdsRef.current.add(id);
+});
+initialLoadDoneRef.current = true;
+return result;
+},
+// Only fetch when:
+// 1. Main query has completed (data is available)
+// 2. We're on initial load (searchString is empty)
+// 3. There are actually missing IDs
+// 4. We're not currently loading the main query
+// 5. We haven't already done the initial fetch
+enabled:
+!isPending &&
+!!data &&
+searchString === "" &&
+missingIds.length > 0 &&
+!initialLoadDoneRef.current,
+// Keep the data even when query is disabled
+staleTime: Infinity,
+gcTime: Infinity, // Previously cacheTime
+});
+
+// Update fetchedMissingOptions when missingData loads
+if (missingData?.data && missingData.data.length > 0) {
+const newOptions = missingData.data.map((blogger) => ({
+label: blogger.name,
+value: blogger.\_id,
+}));
+// Only update if we don't already have these options
+if (
+newOptions.length !== fetchedMissingOptions.length ||
+!newOptions.every((opt) =>
+fetchedMissingOptions.some((f) => f.value === opt.value),
+)
+) {
+setFetchedMissingOptions(newOptions);
+}
+}
+
+return {
+fetchedMissingOptions,
+isFetchingMissing,
+};
+};
+
+````
+
+  </Tab>
+  <Tab value="Utils">
+```tsx title="app/bloggers/components/edit-mode-example/utils.ts"
+import type { Option } from "@/app/components/ui/multi-async-select";
+
+/**
+ * Merges loaded options with fetched missing options.
+ * Only includes fetched missing options on initial load (empty search)
+ * so they get added to the component's reserveOptions.
+ * When searching, only shows search results.
+ */
+export const mergeOptions = (
+  loadedOptions: Option[],
+  fetchedMissingOptions: Option[],
+  searchString: string,
+): Option[] => {
+  let OPTIONS: Option[] = loadedOptions;
+
+  // On initial load (no search), include fetched missing options so they're stored in reserveOptions
+  // When searching, only show search results
+  if (searchString === "" && fetchedMissingOptions.length > 0) {
+    const optionsMap = new Map<string, Option>();
+
+    // First add loaded options
+    loadedOptions.forEach((option) => {
+      optionsMap.set(option.value, option);
+    });
+
+    // Then add fetched missing options (only if not already present)
+    fetchedMissingOptions.forEach((option) => {
+      if (!optionsMap.has(option.value)) {
+        optionsMap.set(option.value, option);
+      }
+    });
+
+    OPTIONS = Array.from(optionsMap.values());
+  }
+
+  return OPTIONS;
+};
+````
+
+  </Tab>
+</Tabs>
+
+**Key Features:**
+
+- Fetches missing selected IDs that aren't in the initial API response
+- Only fetches on initial load (when `searchString === ""`)
+- Uses `useRef` to track already-fetched IDs to prevent redundant API calls
+- Merges options intelligently to avoid duplicates
+- When searching, only shows search results (not fetched missing options)
+
+---
+
+### 4. Paginated Example
+
+This example demonstrates pagination with infinite scroll. The component automatically loads more items when scrolling near the bottom or when content fits in the container.
+
+<Tabs items={['Form - Single', 'Form - Multi', 'Non-Form - Single', 'Non-Form - Multi', 'Hook']}>
+  <Tab value="Form - Single">
+```tsx title="app/bloggers/components/paginated-example/single-select/single-select-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { usePaginatedBloggers } from "../use-paginated-bloggers";
+
+export const SingleSelectPaginatedFormExample = () => {
+  const [isRequired, setIsRequired] = useState(false);
+
+const singleSelectFormSchema = z.object({
+selected: isRequired
+? z.string("Please select a blogger").min(1, "Please select a blogger")
+: z.string().nullable().optional(),
+});
+
+type SingleSelectFormData = z.infer<typeof singleSelectFormSchema>;
+
+const singleForm = useForm<SingleSelectFormData>({
+resolver: zodResolver(singleSelectFormSchema),
+defaultValues: {
+selected: undefined,
+},
+});
+
+const {
+OPTIONS,
+isPending,
+error,
+hasNextPage,
+isFetchingNextPage,
+handleSearch,
+handleLoadMore,
+} = usePaginatedBloggers("bloggers-paginated");
+
+return (
+
+<div className="space-y-4 p-4 border rounded-lg">
+  <h3 className="text-lg font-medium">Single Select</h3>
+  <form
+    onSubmit={singleForm.handleSubmit(data => {
+      console.log("Single form submitted:", data)
+    })}
+    className="space-y-4"
+  >
+    <div className="flex items-center gap-2 pb-2">
+      <Switch
+        id="required-toggle-1"
+        checked={isRequired}
+        onCheckedChange={setIsRequired}
+      />
+      <Label htmlFor="required-toggle-1" className="cursor-pointer">
+        Required field
+      </Label>
+    </div>
+    <div className="space-y-2">
+      <Label>
+        Select a blogger{" "}
+        {isRequired && <span className="text-destructive">\*</span>}
+      </Label>
+      <Controller
+        name="selected"
+        control={singleForm.control}
+        render={({ field, fieldState }) => (
+          <div className="space-y-1">
+            <MultiAsyncSelect
+              async
+              loading={isPending}
+              error={error}
+              options={OPTIONS}
+              value={field.value ?? undefined}
+              onValueChange={value => {
+                // Use null for cleared state (not undefined) to prevent reverting to defaultValues
+                if (Array.isArray(value)) {
+                  field.onChange(value[0] ?? null)
+                } else {
+                  field.onChange(value === undefined ? null : value)
+                }
+              }}
+              onSearch={handleSearch}
+              placeholder="Select a blogger..."
+              multiple={false}
+              searchPlaceholder="Search bloggers..."
+              onLoadMore={handleLoadMore}
+              hasMore={hasNextPage}
+              isLoadingMore={isFetchingNextPage}
+              clearSearchOnClose={true}
+            />
+            {fieldState.error && (
+              <p className="text-sm text-destructive">
+                {fieldState.error.message}
+              </p>
+            )}
+          </div>
+        )}
+      />
+    </div>
+    <div className="flex gap-2">
+      <Button type="submit" size="sm">
+        Submit
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => singleForm.reset()}
+      >
+        Reset
+      </Button>
+    </div>
+  </form>
+</div>
+); };
+
+````
+
+  </Tab>
+  <Tab value="Form - Multi">
+```tsx title="app/bloggers/components/paginated-example/multi-select/multi-select-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { usePaginatedBloggers } from "../use-paginated-bloggers";
+
+export const MultiSelectPaginatedFormExample = () => {
+  const [isRequired, setIsRequired] = useState(false);
+
+  const multiSelectFormSchema = z.object({
+    selected: isRequired
+      ? z.union([z.string(), z.array(z.string())]).refine(
+          (val) => {
+            if (typeof val === "string")
+              return val === "__ALL__" || val.length > 0;
+            return Array.isArray(val) && val.length > 0;
+          },
+          { message: "Please select at least one blogger" },
+        )
+      : z.union([z.string(), z.array(z.string())]),
+    excluded: z.array(z.string()),
+  });
+
+  type MultiSelectFormData = z.infer<typeof multiSelectFormSchema>;
+
+  const multiForm = useForm<MultiSelectFormData>({
+    resolver: zodResolver(multiSelectFormSchema),
+    defaultValues: {
+      selected: [],
+      excluded: [],
+    },
+  });
+
+  const {
+    OPTIONS,
+    isPending,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    handleSearch,
+    handleLoadMore,
+  } = usePaginatedBloggers("bloggers-paginated");
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg">
+      <h3 className="text-lg font-medium">Multi Select</h3>
+      <form
+        onSubmit={multiForm.handleSubmit((data) => {
+          console.log("Multi form submitted:", data);
+        })}
+        className="space-y-4"
+      >
+        <div className="flex items-center gap-2 pb-2">
+          <Switch
+            id="required-toggle-2"
+            checked={isRequired}
+            onCheckedChange={setIsRequired}
+          />
+          <Label htmlFor="required-toggle-2" className="cursor-pointer">
+            Required field
+          </Label>
+        </div>
+        <div className="space-y-2">
+          <Label>
+            Select bloggers{" "}
+            {isRequired && <span className="text-destructive">*</span>}
+          </Label>
+          <Controller
+            name="selected"
+            control={multiForm.control}
+            render={({ field, fieldState }) => (
+              <Controller
+                name="excluded"
+                control={multiForm.control}
+                render={({ field: excludedField }) => (
+                  <div className="space-y-1">
+                    <MultiAsyncSelect
+                      async
+                      loading={isPending}
+                      error={error}
+                      options={OPTIONS}
+                      value={field.value}
+                      excluded={excludedField.value}
+                      onValueChange={(value) => {
+                        if (
+                          value === "__ALL__" ||
+                          (Array.isArray(value) && value[0] === "__ALL__")
+                        ) {
+                          field.onChange("__ALL__");
+                          return;
+                        }
+                        field.onChange(value ?? []);
+                      }}
+                      onExcludedChange={excludedField.onChange}
+                      onSearch={handleSearch}
+                      placeholder="Select bloggers..."
+                      multiple={true}
+                      searchPlaceholder="Search bloggers..."
+                      onLoadMore={handleLoadMore}
+                      hasMore={hasNextPage}
+                      isLoadingMore={isFetchingNextPage}
+                      clearSearchOnClose={true}
+                    />
+                    {fieldState.error && (
+                      <p className="text-sm text-destructive">
+                        {fieldState.error.message}
+                      </p>
+                    )}
+                  </div>
+                )}
+              />
+            )}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button type="submit" size="sm">
+            Submit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => multiForm.reset()}
+          >
+            Reset
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+};
+````
+
+  </Tab>
+  <Tab value="Non-Form - Single">
+```tsx title="app/bloggers/components/paginated-example/single-select/single-select-non-form-example.tsx"
+"use client";
+
+import { useState } from "react";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Label } from "@/components/ui/label";
+import { usePaginatedBloggers } from "../use-paginated-bloggers";
+
+export const SingleSelectPaginatedNonFormExample = () => {
+  const [singleSelectedValue, setSingleSelectedValue] = useState<
+    string | undefined
+  >(undefined);
+
+const {
+OPTIONS,
+isPending,
+error,
+hasNextPage,
+isFetchingNextPage,
+handleSearch,
+handleLoadMore,
+} = usePaginatedBloggers("bloggers-paginated");
+
+const handleSingleValueChange = (value: string[] | string | undefined) => {
+if (Array.isArray(value)) {
+setSingleSelectedValue(value[0]);
+} else {
+setSingleSelectedValue(value);
+}
+};
+
+return (
+
+<div className="space-y-4 p-4 border rounded-lg">
+  <h3 className="text-lg font-medium">Single Select</h3>
+  <div className="space-y-4">
+    <div className="space-y-2">
+      <Label>Select a blogger</Label>
+      <MultiAsyncSelect
+        async
+        loading={isPending}
+        error={error}
+        options={OPTIONS}
+        value={singleSelectedValue}
+        onValueChange={handleSingleValueChange}
+        onSearch={handleSearch}
+        placeholder="Select a blogger..."
+        multiple={false}
+        searchPlaceholder="Search bloggers..."
+        onLoadMore={handleLoadMore}
+        hasMore={hasNextPage}
+        isLoadingMore={isFetchingNextPage}
+        clearSearchOnClose={true}
+      />
+    </div>
+    <div className="p-3 bg-muted rounded-md">
+      <p className="text-sm font-medium mb-1">Selected Value:</p>
+      <code className="text-xs">{singleSelectedValue || "None"}</code>
+    </div>
+  </div>
+</div>
+); };
+
+````
+
+  </Tab>
+  <Tab value="Non-Form - Multi">
+```tsx title="app/bloggers/components/paginated-example/multi-select/multi-select-non-form-example.tsx"
+"use client";
+
+import { useState } from "react";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Label } from "@/components/ui/label";
+import { usePaginatedBloggers } from "../use-paginated-bloggers";
+
+export const MultiSelectPaginatedNonFormExample = () => {
+  const [multiSelectedValues, setMultiSelectedValues] = useState<
+    string[] | string
+  >([]);
+  const [multiExcluded, setMultiExcluded] = useState<string[]>([]);
+
+  const {
+    OPTIONS,
+    isPending,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    handleSearch,
+    handleLoadMore,
+  } = usePaginatedBloggers("bloggers-paginated");
+
+  const handleMultiValueChange = (value: string[] | string | undefined) => {
+    if (
+      value === "__ALL__" ||
+      (Array.isArray(value) && value[0] === "__ALL__")
+    ) {
+      setMultiSelectedValues("__ALL__");
+      return;
+    }
+    setMultiSelectedValues(value ?? []);
+  };
+
+  const handleMultiExcludedChange = (excludedItems: string[]) => {
+    setMultiExcluded(excludedItems);
+  };
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg">
+      <h3 className="text-lg font-medium">Multi Select</h3>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Select bloggers</Label>
+          <MultiAsyncSelect
+            async
+            loading={isPending}
+            error={error}
+            options={OPTIONS}
+            value={multiSelectedValues}
+            excluded={multiExcluded}
+            onValueChange={handleMultiValueChange}
+            onExcludedChange={handleMultiExcludedChange}
+            onSearch={handleSearch}
+            placeholder="Select bloggers..."
+            multiple={true}
+            searchPlaceholder="Search bloggers..."
+            onLoadMore={handleLoadMore}
+            hasMore={hasNextPage}
+            isLoadingMore={isFetchingNextPage}
+            clearSearchOnClose={true}
+          />
+        </div>
+        <div className="p-3 bg-muted rounded-md space-y-2">
+          <div>
+            <p className="text-sm font-medium mb-1">Selected Values:</p>
+            <code className="text-xs">
+              {(() => {
+                if (
+                  typeof multiSelectedValues === "string" &&
+                  multiSelectedValues === "__ALL__"
+                ) {
+                  return "__ALL__";
+                }
+                if (
+                  Array.isArray(multiSelectedValues) &&
+                  multiSelectedValues.length > 0
+                ) {
+                  return JSON.stringify(multiSelectedValues, null, 2);
+                }
+                return "None";
+              })()}
+            </code>
+          </div>
+          {typeof multiSelectedValues === "string" &&
+            multiSelectedValues === "__ALL__" &&
+            multiExcluded.length > 0 && (
+              <div>
+                <p className="text-sm font-medium mb-1">Excluded Items:</p>
+                <code className="text-xs">
+                  {JSON.stringify(multiExcluded, null, 2)}
+                </code>
+              </div>
+            )}
+        </div>
+      </div>
+    </div>
+  );
+};
+````
+
+  </Tab>
+  <Tab value="Hook">
+```tsx title="app/bloggers/components/paginated-example/use-paginated-bloggers.ts"
+import { useInfiniteQuery } from "@tanstack/react-query";
+import { useState } from "react";
+import { useDebouncedCallback } from "use-debounce";
+import type { Option } from "@/app/components/ui/multi-async-select";
+import { fetchBloggers } from "@/app/lib/services/blogger.service";
+
+const PER_PAGE = 8;
+
+export const usePaginatedBloggers = (queryKey: string) => {
+  const [searchString, setSearchString] = useState("");
+
+const {
+data,
+fetchNextPage,
+hasNextPage,
+isFetchingNextPage,
+isPending,
+error,
+} = useInfiniteQuery({
+queryKey: [queryKey, searchString],
+queryFn: async ({ pageParam = 1 }) => {
+return await fetchBloggers({
+name: searchString,
+page: pageParam,
+perPage: PER_PAGE,
+});
+},
+getNextPageParam: (lastPage) => {
+const { pagination } = lastPage;
+if (pagination.currentPage < pagination.pageCount) {
+return pagination.currentPage + 1;
+}
+return undefined;
+},
+initialPageParam: 1,
+enabled: true,
+});
+
+// Flatten all pages into a single array of options
+const OPTIONS: Option[] =
+data?.pages.flatMap((page) =>
+page.data.map((blogger) => ({
+label: blogger.name,
+value: blogger.\_id,
+})),
+) || [];
+
+const handleSearch = useDebouncedCallback((value: string) => {
+setSearchString(value);
+}, 300);
+
+const handleLoadMore = () => {
+if (hasNextPage && !isFetchingNextPage) {
+fetchNextPage();
+}
+};
+
+return {
+OPTIONS,
+data,
+isPending,
+error,
+hasNextPage: hasNextPage ?? false,
+isFetchingNextPage,
+handleSearch,
+handleLoadMore,
+searchString,
+loadedOptionIds: new Set(
+data?.pages.flatMap((page) => page.data.map((blogger) => blogger.\_id)) ||
+[],
+),
+};
+};
+
+````
+
+  </Tab>
+</Tabs>
+
+**Key Features:**
+
+- Uses `useInfiniteQuery` for automatic pagination state management
+- `searchString` in `queryKey` automatically resets pagination when search changes
+- Component automatically loads more when content fits in container (no scrollbar needed)
+- Component detects scroll near bottom and calls `onLoadMore` when content is scrollable
+- Returns `loadedOptionIds` and `searchString` for use with `useFetchMissingBloggers` in edit mode
+
+---
+
+### 5. Paginated with Edit Mode Example
+
+This example combines pagination with edit mode, demonstrating how to handle backend IDs with large paginated datasets.
+
+<Tabs items={['Form - Single', 'Form - Multi', 'Non-Form - Single', 'Non-Form - Multi']}>
+  <Tab value="Form - Single">
+```tsx title="app/bloggers/components/paginated-example/edit-mode/single-select/single-select-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import React, { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { SIMULATED_BACKEND_DATA } from "../../../edit-mode-example/constants";
+import { useFetchMissingBloggers } from "../../../edit-mode-example/hooks/use-fetch-missing-bloggers";
+import { mergeOptions } from "../../../edit-mode-example/utils";
+import { usePaginatedBloggers } from "../../use-paginated-bloggers";
+
+export const SingleSelectEditModePaginatedFormExample = () => {
+  // Simulate receiving data from backend
+  const initialSelectedId = SIMULATED_BACKEND_DATA.singleSelect.selectedId;
+  const [isRequired, setIsRequired] = useState(false);
+
+  const singleSelectFormSchema = z.object({
+    selected: isRequired
+      ? z.string("Please select a blogger").min(1, "Please select a blogger")
+      : z.string().nullable().optional(),
+  });
+
+  type SingleSelectFormData = z.infer<typeof singleSelectFormSchema>;
+
+  const singleForm = useForm<SingleSelectFormData>({
+    resolver: zodResolver(singleSelectFormSchema),
+    defaultValues: {
+      selected: undefined, // Default to undefined so clearing actually clears
+    },
+  });
+
+  // Set initial value after form is created (not as defaultValue)
+  React.useEffect(() => {
+    if (initialSelectedId) {
+      singleForm.setValue("selected", initialSelectedId);
+    }
+  }, [initialSelectedId, singleForm]);
+
+  const {
+    OPTIONS: loadedOptions,
+    data,
+    isPending,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    handleSearch,
+    handleLoadMore,
+    searchString,
+    loadedOptionIds,
+  } = usePaginatedBloggers("bloggers-paginated-edit");
+
+  // Single select: watch current form value to fetch missing blogger if needed
+  const currentSelectedId = singleForm.watch("selected");
+  const selectedIdsForSingle = currentSelectedId ? [currentSelectedId] : [];
+  const {
+    fetchedMissingOptions: singleFetchedMissingOptions,
+    isFetchingMissing: isFetchingSingleMissing,
+  } = useFetchMissingBloggers({
+    selectedIds: selectedIdsForSingle,
+    loadedOptionIds,
+    searchString,
+    isPending,
+    data: data
+      ? {
+          data: data.pages.flatMap((page) => page.data),
+        }
+      : undefined,
+  });
+
+  // Merge options for single select
+  const SINGLE_OPTIONS = mergeOptions(
+    loadedOptions,
+    singleFetchedMissingOptions,
+    searchString,
+  );
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg">
+      <h3 className="text-lg font-medium">Single Select - Edit Mode</h3>
+      <form
+        onSubmit={singleForm.handleSubmit((data) => {
+          console.log("Single form submitted:", data);
+        })}
+        className="space-y-4"
+      >
+        <div className="flex items-center gap-2 pb-2">
+          <Switch
+            id="required-toggle-1"
+            checked={isRequired}
+            onCheckedChange={setIsRequired}
+          />
+          <Label htmlFor="required-toggle-1" className="cursor-pointer">
+            Required field
+          </Label>
+        </div>
+        <div className="space-y-2">
+          <Label>
+            Select a blogger{" "}
+            {isRequired && <span className="text-destructive">*</span>}
+          </Label>
+          <Controller
+            name="selected"
+            control={singleForm.control}
+            render={({ field, fieldState }) => (
+              <div className="space-y-1">
+                <MultiAsyncSelect
+                  async
+                  loading={isPending || isFetchingSingleMissing}
+                  error={error}
+                  options={SINGLE_OPTIONS}
+                  value={field.value ?? undefined}
+                  onValueChange={(value) => {
+                    // Use null for cleared state (not undefined) to prevent reverting to defaultValues
+                    if (Array.isArray(value)) {
+                      field.onChange(value[0] ?? null);
+                    } else {
+                      field.onChange(value === undefined ? null : value);
+                    }
+                  }}
+                  onSearch={handleSearch}
+                  placeholder="Select a blogger..."
+                  multiple={false}
+                  searchPlaceholder="Search bloggers..."
+                  onLoadMore={handleLoadMore}
+                  hasMore={hasNextPage}
+                  isLoadingMore={isFetchingNextPage}
+                  clearSearchOnClose={true}
+                />
+                {fieldState.error && (
+                  <p className="text-sm text-destructive">
+                    {fieldState.error.message}
+                  </p>
+                )}
+              </div>
+            )}
+          />
+        </div>
+        <div className="flex gap-2">
+          <Button type="submit" size="sm">
+            Submit
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            onClick={() => singleForm.reset()}
+          >
+            Reset
+          </Button>
+        </div>
+      </form>
+    </div>
+  );
+};
+````
+
+  </Tab>
+  <Tab value="Form - Multi">
+```tsx title="app/bloggers/components/paginated-example/edit-mode/multi-select/multi-select-form-example.tsx"
+"use client";
+
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useState } from "react";
+import { Controller, useForm } from "react-hook-form";
+import { z } from "zod";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { SIMULATED_BACKEND_DATA } from "../../../edit-mode-example/constants";
+import { useFetchMissingBloggers } from "../../../edit-mode-example/hooks/use-fetch-missing-bloggers";
+import { mergeOptions } from "../../../edit-mode-example/utils";
+import { usePaginatedBloggers } from "../../use-paginated-bloggers";
+
+export const MultiSelectEditModePaginatedFormExample = () => {
+  // Simulate receiving data from backend
+  const initialSelectedIds = SIMULATED_BACKEND_DATA.multiSelect.selectedIds;
+  const [isRequired, setIsRequired] = useState(false);
+
+const multiSelectFormSchema = z.object({
+selected: isRequired
+? z.union([z.string(), z.array(z.string())]).refine(
+(val) => {
+if (typeof val === "string")
+return val === "**ALL**" || val.length > 0;
+return Array.isArray(val) && val.length > 0;
+},
+{ message: "Please select at least one blogger" },
+)
+: z.union([z.string(), z.array(z.string())]),
+excluded: z.array(z.string()),
+});
+
+type MultiSelectFormData = z.infer<typeof multiSelectFormSchema>;
+
+const multiForm = useForm<MultiSelectFormData>({
+resolver: zodResolver(multiSelectFormSchema),
+defaultValues: {
+selected: initialSelectedIds,
+excluded: [],
+},
+});
+
+const {
+OPTIONS: loadedOptions,
+data,
+isPending,
+error,
+hasNextPage,
+isFetchingNextPage,
+handleSearch,
+handleLoadMore,
+searchString,
+loadedOptionIds,
+} = usePaginatedBloggers("bloggers-paginated-edit");
+
+// Multi select: fetch missing bloggers
+const {
+fetchedMissingOptions: multiFetchedMissingOptions,
+isFetchingMissing: isFetchingMultiMissing,
+} = useFetchMissingBloggers({
+selectedIds: initialSelectedIds,
+loadedOptionIds,
+searchString,
+isPending,
+data: data
+? {
+data: data.pages.flatMap((page) => page.data),
+}
+: undefined,
+});
+
+// Merge options for multi select
+const MULTI_OPTIONS = mergeOptions(
+loadedOptions,
+multiFetchedMissingOptions,
+searchString,
+);
+
+return (
+
+<div className="space-y-4 p-4 border rounded-lg">
+  <h3 className="text-lg font-medium">Multi Select - Edit Mode</h3>
+  <form
+    onSubmit={multiForm.handleSubmit(data => {
+      console.log("Multi form submitted:", data)
+    })}
+    className="space-y-4"
+  >
+    <div className="flex items-center gap-2 pb-2">
+      <Switch
+        id="required-toggle-2"
+        checked={isRequired}
+        onCheckedChange={setIsRequired}
+      />
+      <Label htmlFor="required-toggle-2" className="cursor-pointer">
+        Required field
+      </Label>
+    </div>
+    <div className="space-y-2">
+      <Label>
+        Select bloggers{" "}
+        {isRequired && <span className="text-destructive">\*</span>}
+      </Label>
+      <Controller
+        name="selected"
+        control={multiForm.control}
+        render={({ field, fieldState }) => (
+          <Controller
+            name="excluded"
+            control={multiForm.control}
+            render={({ field: excludedField }) => (
+              <div className="space-y-1">
+                <MultiAsyncSelect
+                  async
+                  loading={isPending || isFetchingMultiMissing}
+                  error={error}
+                  options={MULTI_OPTIONS}
+                  value={field.value}
+                  excluded={excludedField.value}
+                  onValueChange={value => {
+                    if (
+                      value === "**ALL**" ||
+                      (Array.isArray(value) && value[0] === "**ALL**")
+                    ) {
+                      field.onChange("**ALL**")
+                      return
+                    }
+                    field.onChange(value ?? [])
+                  }}
+                  onExcludedChange={excludedField.onChange}
+                  onSearch={handleSearch}
+                  placeholder="Select bloggers..."
+                  multiple={true}
+                  searchPlaceholder="Search bloggers..."
+                  onLoadMore={handleLoadMore}
+                  hasMore={hasNextPage}
+                  isLoadingMore={isFetchingNextPage}
+                  clearSearchOnClose={true}
+                />
+                {fieldState.error && (
+                  <p className="text-sm text-destructive">
+                    {fieldState.error.message}
+                  </p>
+                )}
+              </div>
+            )}
+          />
+        )}
+      />
+    </div>
+    <div className="flex gap-2">
+      <Button type="submit" size="sm">
+        Submit
+      </Button>
+      <Button
+        type="button"
+        variant="outline"
+        size="sm"
+        onClick={() => multiForm.reset()}
+      >
+        Reset
+      </Button>
+    </div>
+  </form>
+</div>
+); };
+
+````
+
+  </Tab>
+  <Tab value="Non-Form - Single">
+```tsx title="app/bloggers/components/paginated-example/edit-mode/single-select/single-select-non-form-example.tsx"
+"use client";
+
+import { useState } from "react";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Label } from "@/components/ui/label";
+import { SIMULATED_BACKEND_DATA } from "../../../edit-mode-example/constants";
+import { useFetchMissingBloggers } from "../../../edit-mode-example/hooks/use-fetch-missing-bloggers";
+import { mergeOptions } from "../../../edit-mode-example/utils";
+import { usePaginatedBloggers } from "../../use-paginated-bloggers";
+
+export const SingleSelectEditModePaginatedNonFormExample = () => {
+  // Simulate receiving data from backend
+  const initialSelectedId = SIMULATED_BACKEND_DATA.singleSelect.selectedId;
+
+  // Single select state
+  const [singleSelectedValue, setSingleSelectedValue] = useState<
+    string | null | undefined
+  >(initialSelectedId);
+
+  const {
+    OPTIONS: loadedOptions,
+    data,
+    isPending,
+    error,
+    hasNextPage,
+    isFetchingNextPage,
+    handleSearch,
+    handleLoadMore,
+    searchString,
+    loadedOptionIds,
+  } = usePaginatedBloggers("bloggers-paginated-edit");
+
+  // Single select: use current selected value (not initial) to fetch missing blogger if needed
+  const selectedIdsForSingle = singleSelectedValue ? [singleSelectedValue] : [];
+  const {
+    fetchedMissingOptions: singleFetchedMissingOptions,
+    isFetchingMissing: isFetchingSingleMissing,
+  } = useFetchMissingBloggers({
+    selectedIds: selectedIdsForSingle,
+    loadedOptionIds,
+    searchString,
+    isPending,
+    data: data
+      ? {
+          data: data.pages.flatMap((page) => page.data),
+        }
+      : undefined,
+  });
+
+  // Merge options for single select
+  const SINGLE_OPTIONS = mergeOptions(
+    loadedOptions,
+    singleFetchedMissingOptions,
+    searchString,
+  );
+
+  const handleSingleValueChange = (value: string[] | string | undefined) => {
+    // Use null for cleared state to maintain consistent behavior
+    if (Array.isArray(value)) {
+      setSingleSelectedValue(value[0] ?? null);
+    } else {
+      setSingleSelectedValue(value === undefined ? null : value);
+    }
+  };
+
+  return (
+    <div className="space-y-4 p-4 border rounded-lg">
+      <h3 className="text-lg font-medium">Single Select - Edit Mode</h3>
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <Label>Select a blogger</Label>
+          <MultiAsyncSelect
+            async
+            loading={isPending || isFetchingSingleMissing}
+            error={error}
+            options={SINGLE_OPTIONS}
+            value={singleSelectedValue ?? undefined}
+            onValueChange={handleSingleValueChange}
+            onSearch={handleSearch}
+            placeholder="Select a blogger..."
+            multiple={false}
+            searchPlaceholder="Search bloggers..."
+            onLoadMore={handleLoadMore}
+            hasMore={hasNextPage}
+            isLoadingMore={isFetchingNextPage}
+            clearSearchOnClose={true}
+          />
+        </div>
+        <div className="p-3 bg-muted rounded-md">
+          <p className="text-sm font-medium mb-1">Selected Value:</p>
+          <code className="text-xs">{singleSelectedValue || "None"}</code>
+        </div>
+      </div>
+    </div>
+  );
+};
+````
+
+  </Tab>
+  <Tab value="Non-Form - Multi">
+```tsx title="app/bloggers/components/paginated-example/edit-mode/multi-select/multi-select-non-form-example.tsx"
+"use client";
+
+import { useState } from "react";
+import { MultiAsyncSelect } from "@/app/components/ui/multi-async-select";
+import { Label } from "@/components/ui/label";
+import { SIMULATED_BACKEND_DATA } from "../../../edit-mode-example/constants";
+import { useFetchMissingBloggers } from "../../../edit-mode-example/hooks/use-fetch-missing-bloggers";
+import { mergeOptions } from "../../../edit-mode-example/utils";
+import { usePaginatedBloggers } from "../../use-paginated-bloggers";
+
+export const MultiSelectEditModePaginatedNonFormExample = () => {
+  // Simulate receiving data from backend
+  const initialSelectedIds = SIMULATED_BACKEND_DATA.multiSelect.selectedIds;
+
+// Multi select state
+const [multiSelectedValues, setMultiSelectedValues] = useState<
+string[] | string
+
+> (initialSelectedIds);
+> const [multiExcluded, setMultiExcluded] = useState<string[]>([]);
+
+const {
+OPTIONS: loadedOptions,
+data,
+isPending,
+error,
+hasNextPage,
+isFetchingNextPage,
+handleSearch,
+handleLoadMore,
+searchString,
+loadedOptionIds,
+} = usePaginatedBloggers("bloggers-paginated-edit");
+
+// Multi select: fetch missing bloggers
+const {
+fetchedMissingOptions: multiFetchedMissingOptions,
+isFetchingMissing: isFetchingMultiMissing,
+} = useFetchMissingBloggers({
+selectedIds: initialSelectedIds,
+loadedOptionIds,
+searchString,
+isPending,
+data: data
+? {
+data: data.pages.flatMap((page) => page.data),
+}
+: undefined,
+});
+
+// Merge options for multi select
+const MULTI_OPTIONS = mergeOptions(
+loadedOptions,
+multiFetchedMissingOptions,
+searchString,
+);
+
+const handleMultiValueChange = (value: string[] | string | undefined) => {
+if (
+value === "**ALL**" ||
+(Array.isArray(value) && value[0] === "**ALL**")
+) {
+setMultiSelectedValues("**ALL**");
+return;
+}
+setMultiSelectedValues(value ?? []);
+};
+
+const handleMultiExcludedChange = (excludedItems: string[]) => {
+setMultiExcluded(excludedItems);
+};
+
+return (
+
+<div className="space-y-4 p-4 border rounded-lg">
+  <h3 className="text-lg font-medium">Multi Select - Edit Mode</h3>
+  <div className="space-y-4">
+    <div className="space-y-2">
+      <Label>Select bloggers</Label>
+      <MultiAsyncSelect
+        async
+        loading={isPending || isFetchingMultiMissing}
+        error={error}
+        options={MULTI_OPTIONS}
+        value={multiSelectedValues}
+        excluded={multiExcluded}
+        onValueChange={handleMultiValueChange}
+        onExcludedChange={handleMultiExcludedChange}
+        onSearch={handleSearch}
+        placeholder="Select bloggers..."
+        multiple={true}
+        searchPlaceholder="Search bloggers..."
+        onLoadMore={handleLoadMore}
+        hasMore={hasNextPage}
+        isLoadingMore={isFetchingNextPage}
+        clearSearchOnClose={true}
+      />
+    </div>
+    <div className="p-3 bg-muted rounded-md space-y-2">
+      <div>
+        <p className="text-sm font-medium mb-1">Selected Values:</p>
+        <code className="text-xs">
+          {(() => {
+            if (
+              typeof multiSelectedValues === "string" &&
+              multiSelectedValues === "**ALL**"
+            ) {
+              return "**ALL**"
+            }
+            if (
+              Array.isArray(multiSelectedValues) &&
+              multiSelectedValues.length > 0
+            ) {
+              return JSON.stringify(multiSelectedValues, null, 2)
+            }
+            return "None"
+          })()}
+        </code>
+      </div>
+      {typeof multiSelectedValues === "string" &&
+        multiSelectedValues === "**ALL**" &&
+        multiExcluded.length > 0 && (
+          <div>
+            <p className="text-sm font-medium mb-1">Excluded Items:</p>
+            <code className="text-xs">
+              {JSON.stringify(multiExcluded, null, 2)}
+            </code>
+          </div>
+        )}
+    </div>
+  </div>
+</div>
+); };
+```
+  </Tab>
+</Tabs>
+
+**Key Features:**
+
+- Combines edit mode logic with pagination logic
+- `usePaginatedBloggers` provides `loadedOptionIds` and `searchString` for `useFetchMissingBloggers`
+- Missing IDs are only fetched on initial load (when `searchString === ""`)
+- Works seamlessly with infinite scroll
+- Handles both single and multi-select scenarios
+
+---
+
+## Best Practices
+
+1. **Debounce Search**: Use `useDebouncedCallback` to avoid excessive API calls
+2. **Track Fetched IDs**: Use `useRef` to prevent re-fetching already loaded data
+3. **Merge Options Intelligently**: Only include fetched missing options on initial load
+4. **Reset Pagination on Search**: Include search string in query key
+5. **Handle Loading States**: Show appropriate loading indicators for initial load and pagination
+6. **Auto-Load When Needed**: The component automatically loads more when content fits in container, ensuring users can always access all items regardless of `per_page` size
+7. **Use Null for Cleared State**: In forms, use `null` instead of `undefined` for cleared values to prevent reverting to `defaultValues`
+
+---
+
+**Written By**
+
+<Card>
+  <Author
+    name="Ahmed Hassan"
+    linkedin="https://www.linkedin.com/in/ahmedhassan711"
+    github="https://github.com/saver711"
+    title="Senior Front-End Developer"
+    src="/ah.png"
+  />
+</Card>
+
+---
