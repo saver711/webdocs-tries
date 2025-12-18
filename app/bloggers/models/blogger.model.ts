@@ -1,5 +1,4 @@
 import type { SortOrder } from "@/app/models/api.model";
-import type { BloggersUrlState } from "../hooks/use-bloggers-url-state";
 
 export interface Blogger {
   _id: string;
@@ -13,9 +12,13 @@ export interface Blogger {
   }[];
 }
 
-export interface BloggersTableParams extends BloggersUrlState {
-  page: number;
-  perPage: number;
+export interface BloggersTableParams {
+  page?: number;
+  perPage?: number;
   sortBy?: string;
   sortOrder?: SortOrder;
+  name?: string;
+  bio?: string;
+  dateFrom?: Date;
+  dateTo?: Date;
 }

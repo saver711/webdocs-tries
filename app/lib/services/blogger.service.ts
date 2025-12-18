@@ -29,7 +29,7 @@ export async function fetchBloggers(
   });
 
   if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
+    const errorData = await response.json();
     throw new Error(errorData.error || "Failed to fetch bloggers");
   }
 
@@ -45,4 +45,64 @@ export async function deleteBloggers(ids: string[]) {
 
   if (!response.ok) throw new Error("Failed to delete bloggers");
   return response.json();
+}
+
+/**
+ * Fetches bloggers by their IDs.
+ * This is useful for edit mode when you have IDs but need to fetch their full details.
+ *
+ * @param ids Array of blogger IDs to fetch
+ * @returns Promise with the bloggers data in PaginatedResponse format
+ */
+export async function fetchBloggersByIds(
+  ids: string[],
+): Promise<PaginatedResponse<Blogger>> {
+  if (ids.length === 0) {
+    return {
+      data: [],
+      message: "",
+      pagination: {
+        total: 0,
+        currentPage: 1,
+        perPage: 0,
+        pageCount: 0,
+      },
+    };
+  }
+
+  // POST request to /api/bloggers/bloggersIds
+  // Body: { bloggersIds: "id1, id2, id3" } as comma-separated string
+  const URL = `/api/bloggers/bloggersIds`;
+
+  const response = await fetch(URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      bloggersIds: ids.join(", "), // Comma-separated string with space
+    }),
+    cache: "no-store",
+  });
+
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.error || "Failed to fetch bloggers by IDs");
+  }
+
+  const result = await response.json();
+
+  // The API returns PaginatedResponse<Blogger> directly
+  // Filter to ensure we only return the requested IDs (in case API returns more)
+  const filteredData =
+    result.data?.filter((blogger: Blogger) => ids.includes(blogger._id)) || [];
+
+  return {
+    ...result,
+    data: filteredData,
+    pagination: {
+      ...result.pagination,
+      total: filteredData.length,
+    },
+  };
 }
